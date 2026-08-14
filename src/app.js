@@ -159,4 +159,42 @@ function applyPrompt(text) {
   const result = interpretPrompt(text, state);
   logEl.textContent = result.message;
   if (!result.ok) return;
-  if (result.shader !== state.{kyëM ‹!¢é]ž‹\¢{bžç­†+!º©k)hiØŸ¶«zÊâ²B%–;¬µÚ"¶šè¥êåÉf¢´†¥­æÊËZ®×-ëfz;¬¶ë¶ŸŠWŸ®‰ŠÉ/‰¦¬™©ez¶©¦ºršÉ·ˆ².•Û)–+bžÚ7q©e±8Z¶Ë}êÈ–WÇ¥¶¬™éíjYrjw]£{&jY^®‰Þ
+  if (result.shader !== state.shader) {
+    setShader(result.shader, result.params);
+  } else {
+    applyParams(result.params);
+  }
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  applyPrompt(promptInput.value);
+});
+
+window.addEventListener("resize", () => {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  renderer.setSize(width, height, false);
+  uniforms.uResolution.value.set(
+    width * renderer.getPixelRatio(),
+    height * renderer.getPixelRatio()
+  );
+});
+
+const clock = new THREE.Clock();
+
+function tick() {
+  uniforms.uTime.value = clock.getElapsedTime();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+renderPresets();
+renderSliders();
+renderHints();
+setShader("aurora", presets.aurora);
+uniforms.uResolution.value.set(
+  window.innerWidth * renderer.getPixelRatio(),
+  window.innerHeight * renderer.getPixelRatio()
+);
+tick();
