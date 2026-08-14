@@ -60,7 +60,12 @@ vec2 rotate(vec2 p, float a) {
 
 vec3 grade(vec3 color) {
   color = mix(vec3(dot(color, vec3(0.299, 0.587, 0.114))), color, uContrast);
-  return pow(max(color * uIntensity, 0.0), vec3(0.92));
+  return max(color * uIntensity, 0.0);
+}
+
+float surfaceHeight(vec2 uv) {
+  float t = uTime * uSpeed;
+  return fbm(uv * uScale + vec2(t * 0.07, -t * 0.05) + uWarp * fbm(uv * uScale * 1.7));
 }
 `;
 
@@ -98,7 +103,6 @@ vec3 lookdevSwatch(int index) {
 void main() {
   vec2 uv = vUv;
   vec3 col = vec3(0.18);
-  float t = uTime * uSpeed;
 
   if (uv.y > 0.22) {
     vec2 grid = vec2(uv.x, (uv.y - 0.22) / 0.78);
@@ -109,17 +113,15 @@ void main() {
     col = mix(vec3(0.04), lookdevSwatch(index), frame);
   } else if (uv.y > 0.08) {
     float ramp = clamp((uv.x - 0.04) / 0.92, 0.0, 1.0);
-    col = vec3(pow(ramp, 2.2));
+    col = vec3(ramp);
   } else {
-    float chrome = 0.5 + 0.5 * sin(uv.x * 28.0 + t);
-    col = mix(uColorA, uAccent, chrome);
-    col = mix(col, vec3(0.72), 0.35);
+    col = mix(vec3(0.72), vec3(0.96), smoothstep(0.0, 1.0, uv.x));
   }
 
   float cross = step(0.497, abs(uv.x - 0.5)) * step(abs(uv.y - 0.61), 0.004);
   cross += step(0.497, abs(uv.y - 0.61)) * step(abs(uv.x - 0.5), 0.004);
   col = mix(col, vec3(0.02), cross);
-  gl_FragColor = vec4(grade(col), 1.0);
+  gl_FragColor = vec4(col, 1.0);
 }
 `,
   },
@@ -268,9 +270,81 @@ void main() {
   },
 };
 
+export const channelShaders = {
+  orm: common + /* glsl */ `
+void main() {
+  vec2 uv = vUv;
+  float ao = 1.0;
+  float rough = 1.0;
+  float metal = 1.0;
+
+  if (uv.y > 0.22) {
+    vec2 grid = vec2(uv.x, (uv.y - 0.22) / 0.78);
+    vec2 local = fract(grid * vec2(6.0, 4.0));
+    float edge = min(min(local.x, local.y), min(1.0 - local.x, 1.0 - local.y));
+    ao = mix(0.72, 1.0, smoothstep(0.0, 0.08, edge));
+    rough = 1.0;
+    metal = 0.0;
+  } else if (uv.y > 0.08) {
+    rough = clamp((uv.x - 0.04) / 0.92, 0.0, 1.0);
+    metal = 0.0;
+    ao = 1.0;
+  } else {
+    rough = 0.08;
+    metal = 1.0;
+    ao = 1.0;
+  }
+
+  gl_FragColor = vec4(ao, rough, metal, 1.0);
+}
+`,
+  ormFlat: common + /* glsl */ `
+void main() {
+  gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+}
+`,
+  normal: common + /* glsl */ `
+void main() {
+  vec2 uv = vUv;
+  float texel = 1.0 / max(uResolution.x, 256.0);
+  float h = surfaceHeight(uv);
+  float hx = surfaceHeight(uv + vec2(texel, 0.0));
+  float hy = surfaceHeight(uv + vec2(0.0, texel));
+  vec3 n = normalize(vec3((h - hx) * 6.0, (h - hy) * 6.0, 1.0));
+  gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
+}
+`,
+  normalFlat: common + /* glsl */ `
+void main() {
+  gl_FragColor = vec4(0.5, 0.5, 1.0, 1.0);
+}
+`,
+};
+
+const pbrBase = {
+  family: "pbr",
+  shape: "cube",
+  useMaps: true,
+  uMetalness: 0,
+  uRoughness: 0.36,
+  uEnv: 1.15,
+  uEmissive: 0,
+  uClearcoat: 0,
+  uClearcoatRoughness: 0.22,
+  uSheen: 0,
+  uSheenRoughness: 0.45,
+  uTransmission: 0,
+  uIor: 1.5,
+  uThickness: 0.5,
+  uAnisotropy: 0,
+  uNormal: 0,
+};
+
 export const presets = {
   lookdev: {
+    ...pbrBase,
     shader: "lookdev",
+    name: "Lookdev",
     uColorA: [0.18, 0.18, 0.18],
     uColorB: [0.58, 0.58, 0.58],
     uAccent: [0.86, 0.86, 0.88],
@@ -281,13 +355,105 @@ export const presets = {
     uWarp: 0,
     uGlow: 0,
     uSeed: 1,
-    uMetalness: 0,
-    uRoughness: 0.36,
+    uMetalness: 1,
+    uRoughness: 1,
     uEnv: 1.15,
     uEmissive: 0,
   },
+  chrome: {
+    ...pbrBase,
+    shader: "lookdev",
+    name: "铬",
+    shape: "sphere",
+    useMaps: false,
+    uColorA: [0.18, 0.18, 0.19],
+    uColorB: [0.91, 0.91, 0.92],
+    uAccent: [0.96, 0.96, 0.97],
+    uSpeed: 0,
+    uScale: 1,
+    uIntensity: 1,
+    uContrast: 1,
+    uWarp: 0,
+    uGlow: 0,
+    uSeed: 1,
+    uMetalness: 1,
+    uRoughness: 0.05,
+    uEnv: 1.2,
+    uEmissive: 0,
+  },
+  gray: {
+    ...pbrBase,
+    shader: "lookdev",
+    name: "灰",
+    shape: "sphere",
+    useMaps: false,
+    uColorA: [0.08, 0.08, 0.08],
+    uColorB: [0.18, 0.18, 0.18],
+    uAccent: [0.32, 0.32, 0.32],
+    uSpeed: 0,
+    uScale: 1,
+    uIntensity: 1,
+    uContrast: 1,
+    uWarp: 0,
+    uGlow: 0,
+    uSeed: 1,
+    uMetalness: 0,
+    uRoughness: 0.36,
+    uEnv: 1,
+    uEmissive: 0,
+  },
+  gold: {
+    ...pbrBase,
+    shader: "lookdev",
+    name: "金",
+    shape: "sphere",
+    useMaps: false,
+    uColorA: [0.35, 0.16, 0.02],
+    uColorB: [1.0, 0.549, 0.09],
+    uAccent: [1.0, 0.78, 0.32],
+    uSpeed: 0,
+    uScale: 1,
+    uIntensity: 1,
+    uContrast: 1,
+    uWarp: 0,
+    uGlow: 0,
+    uSeed: 1,
+    uMetalness: 1,
+    uRoughness: 0.18,
+    uEnv: 1.15,
+    uEmissive: 0,
+  },
+  glass: {
+    ...pbrBase,
+    shader: "lookdev",
+    name: "玻璃",
+    shape: "sphere",
+    useMaps: false,
+    uColorA: [0.75, 0.86, 0.9],
+    uColorB: [0.92, 0.97, 1.0],
+    uAccent: [0.75, 0.9, 0.95],
+    uSpeed: 0,
+    uScale: 1,
+    uIntensity: 1,
+    uContrast: 1,
+    uWarp: 0,
+    uGlow: 0,
+    uSeed: 1,
+    uMetalness: 0,
+    uRoughness: 0.04,
+    uEnv: 1,
+    uEmissive: 0,
+    uTransmission: 1,
+    uIor: 1.5,
+    uThickness: 0.55,
+    uClearcoat: 1,
+    uClearcoatRoughness: 0.02,
+  },
   aurora: {
+    ...pbrBase,
+    family: "shader",
     shader: "aurora",
+    name: "极光",
     uColorA: [0.02, 0.05, 0.12],
     uColorB: [0.05, 0.35, 0.38],
     uAccent: [0.45, 0.95, 0.78],
@@ -301,10 +467,14 @@ export const presets = {
     uMetalness: 0.08,
     uRoughness: 0.42,
     uEnv: 1.05,
-    uEmissive: 0.35,
+    uEmissive: 0.18,
+    uNormal: 0.28,
   },
   lava: {
+    ...pbrBase,
+    family: "shader",
     shader: "lava",
+    name: "岩浆",
     uColorA: [0.08, 0.01, 0.01],
     uColorB: [0.72, 0.16, 0.03],
     uAccent: [1.0, 0.78, 0.18],
@@ -318,10 +488,14 @@ export const presets = {
     uMetalness: 0.22,
     uRoughness: 0.52,
     uEnv: 0.9,
-    uEmissive: 0.85,
+    uEmissive: 0.42,
+    uNormal: 0.45,
   },
   ocean: {
+    ...pbrBase,
+    family: "shader",
     shader: "ocean",
+    name: "海洋",
     uColorA: [0.01, 0.05, 0.12],
     uColorB: [0.02, 0.28, 0.42],
     uAccent: [0.45, 0.95, 0.92],
@@ -335,10 +509,16 @@ export const presets = {
     uMetalness: 0.38,
     uRoughness: 0.22,
     uEnv: 1.2,
-    uEmissive: 0.22,
+    uEmissive: 0.08,
+    uClearcoat: 0.35,
+    uClearcoatRoughness: 0.12,
+    uNormal: 0.4,
   },
   plasma: {
+    ...pbrBase,
+    family: "shader",
     shader: "plasma",
+    name: "等离子",
     uColorA: [0.12, 0.0, 0.22],
     uColorB: [0.08, 0.18, 0.55],
     uAccent: [0.95, 0.35, 0.85],
@@ -352,10 +532,15 @@ export const presets = {
     uMetalness: 0.58,
     uRoughness: 0.2,
     uEnv: 1.25,
-    uEmissive: 0.55,
+    uEmissive: 0.28,
+    uAnisotropy: 0.35,
+    uNormal: 0.22,
   },
   stars: {
+    ...pbrBase,
+    family: "shader",
     shader: "stars",
+    name: "星空",
     uColorA: [0.01, 0.02, 0.06],
     uColorB: [0.05, 0.04, 0.14],
     uAccent: [0.85, 0.92, 1.0],
@@ -369,10 +554,14 @@ export const presets = {
     uMetalness: 0.04,
     uRoughness: 0.62,
     uEnv: 0.85,
-    uEmissive: 0.4,
+    uEmissive: 0.22,
+    uNormal: 0.08,
   },
   marble: {
+    ...pbrBase,
+    family: "shader",
     shader: "marble",
+    name: "大理石",
     uColorA: [0.78, 0.74, 0.68],
     uColorB: [0.18, 0.2, 0.24],
     uAccent: [0.95, 0.9, 0.82],
@@ -386,10 +575,16 @@ export const presets = {
     uMetalness: 0.02,
     uRoughness: 0.16,
     uEnv: 1.35,
-    uEmissive: 0.06,
+    uEmissive: 0,
+    uClearcoat: 0.55,
+    uClearcoatRoughness: 0.08,
+    uNormal: 0.32,
   },
   fire: {
+    ...pbrBase,
+    family: "shader",
     shader: "fire",
+    name: "火焰",
     uColorA: [0.05, 0.01, 0.02],
     uColorB: [0.85, 0.22, 0.04],
     uAccent: [1.0, 0.86, 0.32],
@@ -403,10 +598,14 @@ export const presets = {
     uMetalness: 0.12,
     uRoughness: 0.48,
     uEnv: 0.95,
-    uEmissive: 0.92,
+    uEmissive: 0.48,
+    uNormal: 0.38,
   },
   neon: {
+    ...pbrBase,
+    family: "shader",
     shader: "neon",
+    name: "霓虹",
     uColorA: [0.03, 0.01, 0.08],
     uColorB: [0.12, 0.02, 0.22],
     uAccent: [0.2, 0.95, 0.85],
@@ -420,19 +619,43 @@ export const presets = {
     uMetalness: 0.72,
     uRoughness: 0.18,
     uEnv: 1.3,
-    uEmissive: 0.7,
+    uEmissive: 0.32,
+    uAnisotropy: 0.55,
+    uClearcoat: 0.2,
+    uNormal: 0.18,
   },
 };
 
-export const sliderDefs = [
-  { key: "uSpeed", label: "速度", min: 0, max: 2, step: 0.01 },
-  { key: "uScale", label: "尺度", min: 0.4, max: 5, step: 0.01 },
-  { key: "uIntensity", label: "亮度", min: 0.3, max: 2, step: 0.01 },
-  { key: "uContrast", label: "对比", min: 0.4, max: 2, step: 0.01 },
-  { key: "uWarp", label: "扭曲", min: 0, max: 2.4, step: 0.01 },
-  { key: "uGlow", label: "发光", min: 0, max: 2, step: 0.01 },
-  { key: "uMetalness", label: "金属度", min: 0, max: 1, step: 0.01 },
-  { key: "uRoughness", label: "粗糙度", min: 0, max: 1, step: 0.01 },
-  { key: "uEnv", label: "环境光", min: 0, max: 2.4, step: 0.01 },
-  { key: "uEmissive", label: "自发光", min: 0, max: 2, step: 0.01 },
+export const sliderGroups = [
+  {
+    id: "shader",
+    label: "Shader",
+    items: [
+      { key: "uSpeed", label: "速度", min: 0, max: 2, step: 0.01 },
+      { key: "uScale", label: "尺度", min: 0.4, max: 5, step: 0.01 },
+      { key: "uIntensity", label: "亮度", min: 0.3, max: 2, step: 0.01 },
+      { key: "uContrast", label: "对比", min: 0.4, max: 2, step: 0.01 },
+      { key: "uWarp", label: "扭曲", min: 0, max: 2.4, step: 0.01 },
+      { key: "uGlow", label: "发光", min: 0, max: 2, step: 0.01 },
+    ],
+  },
+  {
+    id: "pbr",
+    label: "PBR",
+    items: [
+      { key: "uMetalness", label: "金属度", min: 0, max: 1, step: 0.01 },
+      { key: "uRoughness", label: "粗糙度", min: 0, max: 1, step: 0.01 },
+      { key: "uEnv", label: "环境光", min: 0, max: 2.4, step: 0.01 },
+      { key: "uEmissive", label: "自发光", min: 0, max: 2, step: 0.01 },
+      { key: "uNormal", label: "法线", min: 0, max: 2, step: 0.01 },
+      { key: "uClearcoat", label: "清漆", min: 0, max: 1, step: 0.01 },
+      { key: "uClearcoatRoughness", label: "清漆粗糙", min: 0, max: 1, step: 0.01 },
+      { key: "uSheen", label: "织物光泽", min: 0, max: 1, step: 0.01 },
+      { key: "uTransmission", label: "透射", min: 0, max: 1, step: 0.01 },
+      { key: "uIor", label: "折射率", min: 1, max: 2.33, step: 0.01 },
+      { key: "uAnisotropy", label: "各向异性", min: 0, max: 1, step: 0.01 },
+    ],
+  },
 ];
+
+export const sliderDefs = sliderGroups.flatMap((group) => group.items);
