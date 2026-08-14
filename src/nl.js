@@ -38,11 +38,15 @@ const colorMap = {
 };
 
 const presetHints = [
-  { id: "lookdev", keys: ["lookdev", "look dev", "校准", "标准灰", "灰卡", "macbeth", "色卡"] },
+  { id: "lookdev", keys: ["lookdev", "look dev", "校准", "灰卡", "macbeth", "色卡"] },
+  { id: "chrome", keys: ["铬", "chrome", "镜子", "mirror"] },
+  { id: "gray", keys: ["灰球", "标准灰", "18%灰", "gray ball", "grey ball"] },
+  { id: "gold", keys: ["金球", "黄金球", "gold ball"] },
+  { id: "glass", keys: ["玻璃球", "玻璃", "glass"] },
   { id: "lava", keys: ["岩浆", "熔岩", "火山", "lava", "molten", "magma"] },
   { id: "ocean", keys: ["海", "海洋", "水", "浪", "ocean", "sea", "water"] },
   { id: "aurora", keys: ["极光", "aurora", "northern"] },
-  { id: "stars", keys: ["星空", "星星", "宇宙", "星河", "star", "space", "galaxy", "night"] },
+  { id: "stars", keys: ["星空", "星星", "宇宙", "星河", "star", "space", "galaxy"] },
   { id: "plasma", keys: ["等离子", "赛博", "故障", "plasma", "cyber"] },
   { id: "marble", keys: ["大理石", "玉", "石纹", "marble"] },
   { id: "fire", keys: ["火", "火焰", "燃烧", "fire", "flame", "ember"] },
@@ -76,13 +80,15 @@ export function interpretPrompt(raw, state) {
   const next = { ...state.params };
   const notes = [];
   let shader = state.shader;
+  let presetId = state.preset || state.shader;
 
   for (const item of presetHints) {
     if (item.keys.some((key) => text.includes(key))) {
       const preset = presets[item.id];
+      presetId = item.id;
       shader = preset.shader;
       Object.assign(next, preset);
-      notes.push(`切换到 ${item.id}`);
+      notes.push(`切换到 ${preset.name || item.id}`);
       break;
     }
   }
@@ -150,12 +156,12 @@ export function interpretPrompt(raw, state) {
     next.uSeed = Math.floor(Math.random() * 200);
     notes.push("换了一组噪声种子");
   }
-  if (/更金属|金属感|metallic|more metal/.test(text)) {
+  if (/更金属|金属感|metallic|more metal|chrome|铬/.test(text)) {
     next.uMetalness = nudge(next.uMetalness, 0.22, 0, 1);
     next.uRoughness = nudge(next.uRoughness, -0.12, 0, 1);
     notes.push("提高金属度");
   }
-  if (/塑料|陶瓷|plastic|ceramic|less metal/.test(text)) {
+  if (/塑料|陶瓷|plastic|ceramic|less metal|电介质/.test(text)) {
     next.uMetalness = nudge(next.uMetalness, -0.25, 0, 1);
     notes.push("更像介质");
   }
@@ -172,6 +178,35 @@ export function interpretPrompt(raw, state) {
     next.uEnv = nudge(next.uEnv, 0.2, 0, 2.4);
     notes.push("加强环境光");
   }
+  if (/清漆|车漆|clearcoat|coat/.test(text)) {
+    next.uClearcoat = nudge(next.uClearcoat, 0.28, 0, 1);
+    next.uClearcoatRoughness = nudge(next.uClearcoatRoughness, -0.08, 0, 1);
+    notes.push("加强清漆");
+  }
+  if (/布|织物|丝绒|sheen|velvet|cloth/.test(text)) {
+    next.uSheen = nudge(next.uSheen, 0.3, 0, 1);
+    next.uMetalness = nudge(next.uMetalness, -0.2, 0, 1);
+    notes.push("加织物光泽");
+  }
+  if (/透明|透射|transmission/.test(text) && !/玻璃|glass/.test(text)) {
+    next.uTransmission = nudge(next.uTransmission, 0.35, 0, 1);
+    next.uMetalness = 0;
+    next.uRoughness = nudge(next.uRoughness, -0.18, 0, 1);
+    notes.push("提高透射");
+  }
+  if (/折射率|ior/.test(text)) {
+    next.uIor = nudge(next.uIor, 0.12, 1, 2.33);
+    notes.push("提高折射率");
+  }
+  if (/各向异性|拉丝|aniso|brushed/.test(text)) {
+    next.uAnisotropy = nudge(next.uAnisotropy, 0.28, 0, 1);
+    next.uMetalness = nudge(next.uMetalness, 0.18, 0, 1);
+    notes.push("加各向异性");
+  }
+  if (/法线|凹凸|normal|bump/.test(text)) {
+    next.uNormal = nudge(next.uNormal, 0.25, 0, 2);
+    notes.push("加强法线");
+  }
 
   let environment = state.environment;
   for (const env of Object.values(environments)) {
@@ -185,12 +220,13 @@ export function interpretPrompt(raw, state) {
   if (!notes.length) {
     return {
       ok: false,
-      message: "没听懂这句。可以试：更红、慢一点、改成星空、加发光。",
+      message: "没听懂这句。可以试：更红、慢一点、改成星空、加清漆、更像玻璃。",
     };
   }
 
   return {
     ok: true,
+    preset: presetId,
     shader,
     environment,
     params: next,
@@ -198,10 +234,7 @@ export function interpretPrompt(raw, state) {
   };
 }
 
-export const hintPrompts = [
-  "回到 lookdev",
-  "切到日落环境",
-  "make it more metallic",
-  "换成夜景",
-  "改成岩浆，慢一点",
-];
+export const hintPrompts = {
+  pbr: ["回到 lookdev", "切到铬球", "换成玻璃", "切到日落环境", "加一层清漆"],
+  shader: ["改成岩浆，慢一点", "改成星空", "make it calmer and more purple", "冻结动画"],
+};

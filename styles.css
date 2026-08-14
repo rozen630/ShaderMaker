@@ -116,6 +116,35 @@ body {
   border-radius: 22px;
 }
 
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: -4px 0 16px;
+  padding: 4px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.mode-tab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 12px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.mode-tab.active {
+  color: var(--text);
+  background: rgba(142, 231, 197, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(142, 231, 197, 0.35);
+}
+
 .dock h2 {
   font-size: 12px;
   font-weight: 600;
@@ -129,10 +158,59 @@ body {
 }
 
 .chips,
-.hints {
+.hints,
+.preset-balls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.preset-balls {
+  gap: 10px 8px;
+}
+
+.preset-ball {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 58px;
+  padding: 6px 2px 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 16px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.preset-ball .orb {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 -6px 10px rgba(0, 0, 0, 0.28),
+    0 6px 12px rgba(0, 0, 0, 0.28);
+}
+
+.preset-ball em {
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.preset-ball.active,
+.preset-ball:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--line);
+}
+
+.preset-ball.active .orb {
+  box-shadow:
+    inset 0 -6px 10px rgba(0, 0, 0, 0.22),
+    0 0 0 2px rgba(142, 231, 197, 0.7),
+    0 8px 16px rgba(0, 0, 0, 0.3);
 }
 
 .chip,
@@ -158,6 +236,15 @@ body {
 .sliders {
   display: grid;
   gap: 12px;
+}
+
+.slider-group {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .slider label {
