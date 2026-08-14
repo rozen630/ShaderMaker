@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="widthedevice-width, initial-scale=1.0" />
+  <title>ShaderMaker</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.170.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark"></span>
+      <div>
+        <strong>ShaderMaker</strong>
+        <p>Three.js · 自然语言调 shader</p>
+      </div>
+    </div>
+    <div class="status">
+      <span id="shader-name">Aurora Drift</span>
+      <span id="compile-state" class="ok">ready</span>
+    </div>
+  </header>
+
+  <aside class="dock">
+    <section>
+      <h2>预设</h2>
+      <div id="presets" class="chips"></div>
+    </section>
+
+    <section>
+      <h2>参数</h2>
+      <div id="sliders" class="sliders"></div>
+    </section>
+  </aside>
+
+  <footer class="composer">
+    <div id="hints" class="hints"></div>
+    <form id="prompt-form">
+      <input
+        id="prompt"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="用自然语言改效果，例如：更像岩浆，慢一点，颜色偏金橙"
+      />
+      <button type="submit">应用</button>
+    </form>
+    <p id="nl-log" class="nl-log">试试：改成星空 / make it calmer and more purple / 冻结动画</p>
+  </footer>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
