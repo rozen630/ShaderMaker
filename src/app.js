@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
-import { vertexShader, shaders, presets, sliderDefs } from "./shaders.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { vertexShader, shaders, presets, sliderGroups, channelShaders } from "./shaders.js";
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 
@@ -30,7 +31,6 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x141820);
-scene.fog = new THREE.Fog(0x141820, 10, 24);
 scene.backgroundBlurriness = 0.18;
 scene.backgroundIntensity = 0.55;
 
@@ -49,11 +49,12 @@ controls.update();
 const pmrem = new THREE.PMREMGenerator(renderer);
 const hdrLoader = new RGBELoader();
 const envCache = new Map();
+const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-const hemi = new THREE.HemisphereLight(0xdde7ff, 0x1a1512, 0.45);
+const hemi = new THREE.HemisphereLight(0xdde7ff, 0x1a1512, 0.18);
 scene.add(hemi);
 
-const keyLight = new THREE.DirectionalLight(0xfff3e2, 1.4);
+const keyLight = new THREE.DirectionalLight(0xfff3e2, 0.55);
 keyLight.position.set(3.4, 5.2, 2.6);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(1024, 1024);
@@ -66,11 +67,11 @@ keyLight.shadow.camera.bottom = -4;
 keyLight.shadow.bias = -0.0006;
 scene.add(keyLight);
 
-const fillLight = new THREE.DirectionalLight(0xa9c8ff, 0.38);
+const fillLight = new THREE.DirectionalLight(0xa9c8ff, 0.16);
 fillLight.position.set(-3.6, 2.0, -1.8);
 scene.add(fillLight);
 
-const rimLight = new THREE.PointLight(0x8ee7c5, 5.5, 10, 2);
+const rimLight = new THREE.PointLight(0x8ee7c5, 2.2, 10, 2);
 rimLight.position.set(-1.5, 2.3, 2.2);
 scene.add(rimLight);
 
@@ -105,7 +106,7 @@ const softboxMat = new THREE.MeshStandardMaterial({
 });
 const keyCard = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.2), softboxMat);
 keyCard.position.set(3.1, 3.4, 1.4);
-keyCard.lookAt(0, 1.4, 0);
+keyCard.lookat(0, 1.4, 0);
 scene.add(keyCard);
 
 const fillCard = new THREE.Mesh(
@@ -130,28 +131,19 @@ const pedestalMat = new THREE.MeshStandardMaterial({
   metalness: 0.62,
   envMapIntensity: 0.9,
 });
-const plinth = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.78, 0.86, 0.18, 64),
-  pedestalMat
-);
+const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.86, 0.18, 64), pedestalMat);
 plinth.position.y = 0.09;
 plinth.castShadow = true;
 plinth.receiveShadow = true;
 scene.add(plinth);
 
-const column = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.42, 0.5, 0.62, 48),
-  pedestalMat.clone()
-);
+const column = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.62, 48), pedestalMat.clone());
 column.position.y = 0.49;
 column.castShadow = true;
 column.receiveShadow = true;
 scene.add(column);
 
-const cap = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.56, 0.5, 0.08, 64),
-  pedestalMat.clone()
-);
+const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.5, 0.08, 64), pedestalMat.clone());
 cap.position.y = 0.84;
 cap.castShadow = true;
 cap.receiveShadow = true;
@@ -163,59 +155,109 @@ const shaderUniforms = {
   uColorA: { value: new THREE.Color() },
   uColorB: { value: new THREE.Color() },
   uAccent: { value: new THREE.Color() },
-  uSpeed: { value: 0.55 },
-  uScale: { value: 2.2 },
-  uIntensity: { value: 1.05 },
-  uContrast: { value: 1.15 },
-  uWarp: { value: 1.15 },
-  uGlow: { value: 0.85 },
-  uSeed: { value: 11 },
+  uSpeed: { value: 0.12 },
+  uScale: { value: 1 },
+  uIntensity: { value: 1 },
+  uContrast: { value: 1 },
+  uWarp: { value: 0 },
+  uGlow: { value: 0 },
+  uSeed: { value: 1 },
 };
 
-const surfaceMaterial = new THREE.ShaderMaterial({
-  uniforms: shaderUniforms,
-  vertexShader,
-  fragmentShader: shaders.lookdev.fragment,
-  depthTest: false,
-  depthWrite: false,
-});
+function makeSurfaceMaterial(fragment) {
+  return new THREE.ShaderMaterial({
+    uniforms: shaderUniforms,
+    vertexShader,
+    fragmentShader: fragment,
+    depthTest: false,
+    depthWrite: false,
+  });
+}
+
+const albedoMaterial = makeSurfaceMaterial(shaders.lookdev.fragment);
+const ormMaterial = makeSurfaceMaterial(channelShaders.orm);
+const normalMaterial = makeSurfaceMaterial(channelShaders.normalFlat);
 
 const surfaceScene = new THREE.Scene();
 const surfaceCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-surfaceScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), surfaceMaterial));
+const surfaceMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), albedoMaterial);
+surfaceScene.add(surfaceMesh);
 
-const surfaceTarget = new THREE.WebGLRenderTarget(1024, 1024, {
-  type: THREE.HalfFloatType,
-  colorSpace: THREE.SRGBColorSpace,
-});
-surfaceTarget.texture.generateMipmaps = true;
-surfaceTarget.texture.minFilter = THREE.LinearMipmapLinearFilter;
-surfaceTarget.texture.magFilter = THREE.LinearFilter;
-surfaceTarget.texture.wrapS = THREE.RepeatWrapping;
-surfaceTarget.texture.wrapT = THREE.RepeatWrapping;
+function makeTarget(colorSpace) {
+  const target = new THREE.WebGLRenderTarget(1024, 1024, {
+    type: THREE.HalfFloatType,
+    colorSpace,
+  });
+  target.texture.generateMipmaps = true;
+  target.texture.minFilter = THREE.LinearMipmapLinearFilter;
+  target.texture.magFilter = THREE.LinearFilter;
+  target.texture.wrapS = THREE.RepeatWrapping;
+  target.texture.wrapT = THREE.RepeatWrapping;
+  return target;
+}
+
+const albedoTarget = makeTarget(THREE.SRGBColorSpace);
+const ormTarget = makeTarget(THREE.NoColorSpace);
+const normalTarget = makeTarget(THREE.NoColorSpace);
+
+const cubeGeometry = new THREE.BoxGeometry(0.92, 0.92, 0.92, 1, 1, 1);
+cubeGeometry.setAttribute("uv2", cubeGeometry.attributes.uv.clone());
+cubeGeometry.computeTangents();
 
 const cubeMaterial = new THREE.MeshPhysicalMaterial({
-  map: surfaceTarget.texture,
-  emissiveMap: surfaceTarget.texture,
+  map: albedoTarget.texture,
+  roughnessMap: ormTarget.texture,
+  metalnessMap: ormTarget.texture,
+  aoMap: ormTarget.texture,
+  aoMapIntensity: 1,
+  normalMap: normalTarget.texture,
+  normalScale: new THREE.Vector2(0, 0),
+  emissiveMap: albedoTarget.texture,
   emissive: new THREE.Color(0xffffff),
-  emissiveIntensity: 0.35,
-  metalness: 0.08,
-  roughness: 0.42,
-  envMapIntensity: 1.05,
-  clearcoat: 0.18,
-  clearcoatRoughness: 0.35,
+  emissiveIntensity: 0,
+  metalness: 1,
+  roughness: 1,
+  envMapIntensity: 1.15,
+  clearcoat: 0,
+  clearcoatRoughness: 0.22,
+  sheen: 0,
+  sheenRoughness: 0.45,
+  sheenColor: new THREE.Color(0xffffff),
+  transmission: 0,
+  ior: 1.5,
+  thickness: 0.5,
+  anisotropy: 0,
+  opacity: 1,
 });
 
-const cube = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.92, 0.92, 1, 1, 1), cubeMaterial);
-cube.position.y = 1.44;
-cube.castShadow = true;
-scene.add(cube);
+const sphereGeometry = new THREE.SphereGeometry(0.56, 64, 48);
+sphereGeometry.setAttribute("uv2", sphereGeometry.attributes.uv.clone());
+sphereGeometry.computeTangents();
+
+const subject = new THREE.Mesh(cubeGeometry, cubeMaterial);
+subject.position.y = 1.44;
+subject.castShadow = true;
+scene.add(subject);
 
 const state = {
-  shader: "aurora",
+  mode: "pbr",
+  preset: "lookdev",
+  shader: "lookdev",
   environment: defaultEnvironment,
-  params: { ...presets.aurora },
+  params: { ...presets.lookdev },
 };
+
+function presetFamily(preset) {
+  return preset?.family || "pbr";
+}
+
+function presetsForMode(mode = state.mode) {
+  return Object.entries(presets).filter(([, preset]) => presetFamily(preset) === mode);
+}
+
+function slidersForMode(mode = state.mode) {
+  return sliderGroups.filter((group) => group.id === mode);
+}
 
 function applyLight(light, spec) {
   light.color.setHex(spec.color);
@@ -236,10 +278,14 @@ async function loadEnvironmentMap(url) {
   return pending;
 }
 
+function applyEnvironmentRotation(radians) {
+  if (scene.environmentRotation) scene.environmentRotation.set(0, radians, 0);
+  if (scene.backgroundRotation) scene.backgroundRotation.set(0, radians, 0);
+}
+
 async function setEnvironment(id) {
   const env = environments[id] || environments[defaultEnvironment];
   state.environment = env.id;
-  scene.fog.color.setHex(env.fog);
   scene.background = new THREE.Color(env.background);
   scene.backgroundBlurriness = env.backgroundBlurriness;
   scene.backgroundIntensity = env.backgroundIntensity;
@@ -252,15 +298,22 @@ async function setEnvironment(id) {
   applyLight(keyLight, env.key);
   applyLight(fillLight, env.fill);
   applyLight(rimLight, env.rim);
+  hemi.intensity = env.hemi;
   for (const mesh of studioSet) mesh.visible = env.showStudio;
+  applyEnvironmentRotation(env.rotation);
   highlightEnvironment();
   try {
     const envMap = await loadEnvironmentMap(env.hdr);
     if (state.environment !== env.id) return;
     scene.environment = envMap;
     scene.background = envMap;
+    applyEnvironmentRotation(env.rotation);
+    setCompileState(true, "ready");
   } catch (error) {
     console.warn("HDR environment failed", error);
+    scene.environment = roomEnv;
+    scene.background = new THREE.Color(env.background);
+    applyEnvironmentRotation(0);
     setCompileState(false, "hdr fallback");
   }
 }
@@ -277,6 +330,48 @@ function setCompileState(ok, text) {
   stateEl.className = ok ? "ok" : "err";
 }
 
+function usesMaps(params = state.params) {
+  return params.useMaps !== false;
+}
+
+function updateChannelShaders() {
+  const lookdevMaps = state.shader === "lookdev" && usesMaps();
+  ormMaterial.fragmentShader = lookdevMaps ? channelShaders.orm : channelShaders.ormFlat;
+  normalMaterial.fragmentShader =
+    lookdevMaps || state.params.uNormal <= 0.001 ? channelShaders.normalFlat : channelShaders.normal;
+  ormMaterial.needsUpdate = true;
+  normalMaterial.needsUpdate = true;
+}
+
+function applyPhysical(params) {
+  const mapped = usesMaps(params);
+  cubeMaterial.metalness = params.uMetalness;
+  cubeMaterial.roughness = params.uRoughness;
+  cubeMaterial.envMapIntensity = params.uEnv;
+  cubeMaterial.emissiveIntensity = params.uEmissive;
+  cubeMaterial.clearcoat = params.uClearcoat;
+  cubeMaterial.clearcoatRoughness = params.uClearcoatRoughness;
+  cubeMaterial.sheen = params.uSheen;
+  cubeMaterial.sheenRoughness = params.uSheenRoughness;
+  cubeMaterial.sheenColor.setRGB(...params.uAccent);
+  cubeMaterial.transmission = params.uTransmission;
+  cubeMaterial.ior = params.uIor;
+  cubeMaterial.thickness = params.uThickness;
+  cubeMaterial.anisotropy = params.uAnisotropy;
+  cubeMaterial.normalScale.setScalar(mapped && state.shader !== "lookdev" ? params.uNormal : 0);
+  cubeMaterial.map = mapped ? albedoTarget.texture : null;
+  cubeMaterial.roughnessMap = mapped ? ormTarget.texture : null;
+  cubeMaterial.metalnessMap = mapped ? ormTarget.texture : null;
+  cubeMaterial.aoMap = mapped ? ormTarget.texture : null;
+  cubeMaterial.normalMap = mapped ? normalTarget.texture : null;
+  cubeMaterial.emissiveMap = mapped ? albedoTarget.texture : null;
+  if (mapped) cubeMaterial.color.setRGB(1, 1, 1);
+  else cubeMaterial.color.setRGB(...params.uColorB);
+  cubeMaterial.opacity = 1;
+  cubeMaterial.transparent = params.uTransmission > 0.001;
+  cubeMaterial.needsUpdate = true;
+}
+
 function applyParams(params) {
   state.params = { ...params };
   shaderUniforms.uColorA.value.setRGB(...params.uColorA);
@@ -289,39 +384,62 @@ function applyParams(params) {
   shaderUniforms.uWarp.value = params.uWarp;
   shaderUniforms.uGlow.value = params.uGlow;
   shaderUniforms.uSeed.value = params.uSeed;
-  cubeMaterial.metalness = params.uMetalness;
-  cubeMaterial.roughness = params.uRoughness;
-  cubeMaterial.envMapIntensity = params.uEnv;
-  cubeMaterial.emissiveIntensity = params.uEmissive;
-  cubeMaterial.needsUpdate = true;
+  updateChannelShaders();
+  applyPhysical(params);
   syncSliders();
 }
 
-function setShader(id, params = presets[id] || state.params) {
-  const shader = shaders[id];
+function setPreset(id, params = presets[id] || state.params) {
+  const shaderId = params.shader || id;
+  const shader = shaders[shaderId];
   if (!shader) return;
-  state.shader = id;
-  surfaceMaterial.fragmentShader = shader.fragment;
-  surfaceMaterial.needsUpdate = true;
-  nameEl.textContent = shader.name;
-  applyParams({ ...params, shader: id });
+  const nextMode = presetFamily(params);
+  state.mode = nextMode;
+  state.preset = id;
+  state.shader = shaderId;
+  albedoMaterial.fragmentShader = shader.fragment;
+  albedoMaterial.needsUpdate = true;
+  nameEl.textContent = params.name || shader.name;
+  subject.geometry = params.shape === "sphere" ? sphereGeometry : cubeGeometry;
+  applyParams({ ...params, shader: shaderId });
+  highlightMode();
+  renderPresets();
+  renderSliders();
+  syncSliders();
+  renderHints();
   highlightPreset();
   setCompileState(true, "ready");
 }
 
 function highlightPreset() {
-  for (const button of presetRoot.querySelectorAll(".chip")) {
-    button.classList.toggle("active", button.dataset.id === state.shader);
+  for (const button of presetRoot.querySelectorAll("[data-id]")) {
+    button.classList.toggle("active", button.dataset.id === state.preset);
   }
 }
 
+function highlightMode() {
+  for (const button of document.querySelectorAll(".mode-tab")) {
+    button.classList.toggle("active", button.dataset.mode === state.mode);
+  }
+}
+
+function setMode(mode) {
+  if (mode !== "pbr" && mode !== "shader") return;
+  if (mode === state.mode) return;
+  const fallback = presetsForMode(mode)[0];
+  if (!fallback) return;
+  setPreset(fallback[0], fallback[1]);
+}
+
 function syncSliders() {
-  for (const def of sliderDefs) {
-    const input = sliderRoot.querySelector(`input[data-key="${def.key}"]`);
-    const value = sliderRoot.querySelector(`span[data-key="${def.key}"]`);
-    if (!input || !value) continue;
-    input.value = String(state.params[def.key]);
-    value.textContent = Number(state.params[def.key]).toFixed(2);
+  for (const group of slidersForMode()) {
+    for (const def of group.items) {
+      const input = sliderRoot.querySelector(`input[data-key="${def.key}"]`);
+      const value = sliderRoot.querySelector(`span[data-key="${def.key}"]`);
+      if (!input || !value) continue;
+      input.value = String(state.params[def.key]);
+      value.textContent = Number(state.params[def.key]).toFixed(2);
+    }
   }
 }
 
@@ -342,17 +460,41 @@ function renderEnvironments() {
   }
 }
 
+function rgbCss(rgb) {
+  return `rgb(${rgb.map((channel) => Math.round(channel * 255)).join(", ")})`;
+}
+
+function orbStyle(preset) {
+  const mid = rgbCss(preset.uColorB);
+  const dark = rgbCss(preset.uColorA);
+  const light = rgbCss(preset.uAccent);
+  const glass = (preset.uTransmission || 0) > 0.4;
+  const metal = (preset.uMetalness || 0) > 0.6;
+  const shine = metal ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)";
+  const fill = glass
+    ? `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.85), ${mid} 38%, rgba(180,210,230,0.28) 70%, rgba(255,255,255,0.2))`
+    : `radial-gradient(circle at 32% 28%, ${shine}, ${mid} 42%, ${dark} 100%)`;
+  return `background:${fill};`;
+}
+
 function renderPresets() {
   presetRoot.innerHTML = "";
-  for (const [id, preset] of Object.entries(presets)) {
+  presetRoot.className = state.mode === "pbr" ? "preset-balls" : "chips";
+  for (const [id, preset] of presetsForMode()) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "chip";
+    const label = preset.name || shaders[preset.shader].name;
+    if (state.mode === "pbr") {
+      button.className = "preset-ball";
+      button.innerHTML = `<span class="orb" style="${orbStyle(preset)}"></span><em>${label}</em>`;
+    } else {
+      button.className = "chip";
+      button.textContent = label;
+    }
     button.dataset.id = id;
-    button.textContent = shaders[preset.shader].name;
     button.addEventListener("click", () => {
-      setShader(id, preset);
-      logEl.textContent = `已切换到 ${shaders[preset.shader].name}`;
+      setPreset(id, preset);
+      logEl.textContent = `已切换到 ${label}`;
     });
     presetRoot.append(button);
   }
@@ -360,35 +502,36 @@ function renderPresets() {
 
 function renderSliders() {
   sliderRoot.innerHTML = "";
-  for (const def of sliderDefs) {
-    const wrap = document.createElement("div");
-    wrap.className = "slider";
-    wrap.innerHTML = `
-      <label>
-        <b>${def.label}</b>
-        <span data-key="${def.key}">0.00</span>
-      </label>
-      <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" data-key="${def.key}" />
-    `;
-    const input = wrap.querySelector("input");
-    input.addEventListener("input", () => {
-      state.params[def.key] = Number(input.value);
-      if (shaderUniforms[def.key]) {
-        shaderUniforms[def.key].value = state.params[def.key];
-      }
-      if (def.key === "uMetalness") cubeMaterial.metalness = state.params.uMetalness;
-      if (def.key === "uRoughness") cubeMaterial.roughness = state.params.uRoughness;
-      if (def.key === "uEnv") cubeMaterial.envMapIntensity = state.params.uEnv;
-      if (def.key === "uEmissive") cubeMaterial.emissiveIntensity = state.params.uEmissive;
-      syncSliders();
-    });
-    sliderRoot.append(wrap);
+  for (const group of slidersForMode()) {
+    for (const def of group.items) {
+      const wrap = document.createElement("div");
+      wrap.className = "slider";
+      wrap.innerHTML = `
+        <label>
+          <b>${def.label}</b>
+          <span data-key="${def.key}">0.00</span>
+        </label>
+        <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" data-key="${def.key}" />
+      `;
+      const input = wrap.querySelector("input");
+      input.addEventListener("input", () => {
+        state.params[def.key] = Number(input.value);
+        if (shaderUniforms[def.key]) {
+          shaderUniforms[def.key].value = state.params[def.key];
+        }
+        updateChannelShaders();
+        applyPhysical(state.params);
+        syncSliders();
+      });
+      sliderRoot.append(wrap);
+    }
   }
 }
 
 function renderHints() {
   hintRoot.innerHTML = "";
-  for (const text of hintPrompts) {
+  const hints = state.mode === "pbr" ? hintPrompts.pbr : hintPrompts.shader;
+  for (const text of hints) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = text;
@@ -404,8 +547,9 @@ function applyPrompt(text) {
   const result = interpretPrompt(text, state);
   logEl.textContent = result.message;
   if (!result.ok) return;
-  if (result.shader !== state.shader) {
-    setShader(result.shader, result.params);
+  const nextPreset = result.preset || result.shader;
+  if (nextPreset !== state.preset || result.shader !== state.shader) {
+    setPreset(nextPreset, result.params);
   } else {
     applyParams(result.params);
   }
@@ -437,17 +581,17 @@ function syncViewport(resetOrbit = false) {
   camera.fov = aspect < 0.72 ? 46 : 38;
   camera.updateProjectionMatrix();
 
-  const subject = new THREE.Box3(
+  const bounds = new THREE.Box3(
     new THREE.Vector3(-0.86, 0, -0.86),
     new THREE.Vector3(0.86, 2.02, 0.86)
   );
-  const size = subject.getSize(new THREE.Vector3());
-  const center = subject.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
   const maxSize = Math.max(size.x, size.y, size.z);
   const vFit = maxSize / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
   const distance = Math.max(vFit, vFit / Math.max(aspect, 0.35)) * 2.05;
 
-  controls.target.copy(center);
+  controls.target.copy(centeri;
   const direction = resetOrbit
     ? new THREE.Vector3(0.58, 0.32, 1)
     : camera.position.clone().sub(controls.target);
@@ -470,24 +614,34 @@ new ResizeObserver(() => requestViewportSync(false)).observe(canvas);
 
 const clock = new THREE.Clock();
 
+function drawChannel(material, target) {
+  surfaceMesh.material = material;
+  renderer.setRenderTarget(target);
+  renderer.render(surfaceScene, surfaceCamera);
+}
+
 function tick() {
   const elapsed = clock.getElapsedTime();
   shaderUniforms.uTime.value = elapsed;
-  cube.rotation.y = elapsed * 0.18;
-  cube.rotation.x = Math.sin(elapsed * 0.11) * 0.08;
+  subject.rotation.y = elapsed * 0.18;
+  subject.rotation.x = Math.sin(elapsed * 0.11) * 0.08;
   controls.update();
-  renderer.setRenderTarget(surfaceTarget);
-  renderer.render(surfaceScene, surfaceCamera);
+  drawChannel(albedoMaterial, albedoTarget);
+  drawChannel(ormMaterial, ormTarget);
+  drawChannel(normalMaterial, normalTarget);
   renderer.setRenderTarget(null);
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
 
-renderPresets();
+document.getElementById("mode-tabs")?.addEventListener("click", (event) => {
+  const button = event.target.closest(".mode-tab");
+  if (!button) return;
+  setMode(button.dataset.mode);
+});
+
 renderEnvironments();
-renderSliders();
-renderHints();
-setShader("lookdev", presets.lookdev);
+setPreset("lookdev", presets.lookdev);
 setEnvironment(defaultEnvironment);
 syncViewport(true);
 tick();
