@@ -22,7 +22,7 @@
       <span class="mark"></span>
       <div>
         <strong>ShaderMaker</strong>
-        <p>Three.js · 自然语言调 shader</p>
+        <p>Three.js · PBR Lookdev</p>
       </div>
     </div>
     <div class="status">
@@ -32,6 +32,11 @@
   </header>
 
   <aside class="dock">
+    <div id="mode-tabs" class="mode-tabs" role="tablist">
+      <button type="button" class="mode-tab active" data-mode="pbr">PBR</button>
+      <button type="button" class="mode-tab" data-mode="shader">Shader</button>
+    </div>
+
     <section>
       <h2>预设</h2>
       <div id="presets" class="chips"></div>
@@ -56,7 +61,7 @@
         type="text"
         autocomplete="off"
         spellcheck="false"
-        placeholder="用自然语言改效果，例如：更像岩浆，慢一点，颜色偏金橙"
+        placeholder="用自然语言改效果，例如：加一层清漆，更像玻璃，切到日落环境"
       />
       <button type="submit">应用</button>
     </form>
