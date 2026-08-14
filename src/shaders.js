@@ -65,6 +65,64 @@ vec3 grade(vec3 color) {
 `;
 
 export const shaders = {
+  lookdev: {
+    name: "PBR Lookdev",
+    fragment: common + /* glsl */ `
+vec3 lookdevSwatch(int index) {
+  if (index == 0) return vec3(0.115, 0.081, 0.053);
+  if (index == 1) return vec3(0.392, 0.292, 0.232);
+  if (index == 2) return vec3(0.187, 0.244, 0.373);
+  if (index == 3) return vec3(0.116, 0.174, 0.070);
+  if (index == 4) return vec3(0.323, 0.236, 0.408);
+  if (index == 5) return vec3(0.191, 0.426, 0.408);
+  if (index == 6) return vec3(0.605, 0.309, 0.051);
+  if (index == 7) return vec3(0.087, 0.144, 0.387);
+  if (index == 8) return vec3(0.540, 0.137, 0.160);
+  if (index == 9) return vec3(0.120, 0.065, 0.155);
+  if (index == 10) return vec3(0.353, 0.462, 0.078);
+  if (index == 11) return vec3(0.751, 0.474, 0.020);
+  if (index == 12) return vec3(0.038, 0.066, 0.298);
+  if (index == 13) return vec3(0.099, 0.366, 0.099);
+  if (index == 14) return vec3(0.573, 0.077, 0.077);
+  if (index == 15) return vec3(0.791, 0.679, 0.018);
+  if (index == 16) return vec3(0.392, 0.112, 0.330);
+  if (index == 17) return vec3(0.020, 0.286, 0.469);
+  if (index == 18) return vec3(0.910, 0.910, 0.895);
+  if (index == 19) return vec3(0.580, 0.584, 0.578);
+  if (index == 20) return vec3(0.355, 0.356, 0.353);
+  if (index == 21) return vec3(0.191, 0.193, 0.193);
+  if (index == 22) return vec3(0.089, 0.090, 0.092);
+  return vec3(0.031, 0.031, 0.032);
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec3 col = vec3(0.18);
+  float t = uTime * uSpeed;
+
+  if (uv.y > 0.22) {
+    vec2 grid = vec2(uv.x, (uv.y - 0.22) / 0.78);
+    vec2 cell = floor(grid * vec2(6.0, 4.0));
+    int index = int(cell.x) + int(3.0 - cell.y) * 6;
+    vec2 local = fract(grid * vec2(6.0, 4.0));
+    float frame = smoothstep(0.0, 0.03, min(min(local.x, local.y), min(1.0 - local.x, 1.0 - local.y)));
+    col = mix(vec3(0.04), lookdevSwatch(index), frame);
+  } else if (uv.y > 0.08) {
+    float ramp = clamp((uv.x - 0.04) / 0.92, 0.0, 1.0);
+    col = vec3(pow(ramp, 2.2));
+  } else {
+    float chrome = 0.5 + 0.5 * sin(uv.x * 28.0 + t);
+    col = mix(uColorA, uAccent, chrome);
+    col = mix(col, vec3(0.72), 0.35);
+  }
+
+  float cross = step(0.497, abs(uv.x - 0.5)) * step(abs(uv.y - 0.61), 0.004);
+  cross += step(0.497, abs(uv.y - 0.61)) * step(abs(uv.x - 0.5), 0.004);
+  col = mix(col, vec3(0.02), cross);
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`,
+  },
   aurora: {
     name: "Aurora Drift",
     fragment: common + /* glsl */ `
@@ -211,6 +269,23 @@ void main() {
 };
 
 export const presets = {
+  lookdev: {
+    shader: "lookdev",
+    uColorA: [0.18, 0.18, 0.18],
+    uColorB: [0.58, 0.58, 0.58],
+    uAccent: [0.86, 0.86, 0.88],
+    uSpeed: 0.12,
+    uScale: 1,
+    uIntensity: 1,
+    uContrast: 1,
+    uWarp: 0,
+    uGlow: 0,
+    uSeed: 1,
+    uMetalness: 0,
+    uRoughness: 0.36,
+    uEnv: 1.15,
+    uEmissive: 0,
+  },
   aurora: {
     shader: "aurora",
     uColorA: [0.02, 0.05, 0.12],
@@ -223,6 +298,10 @@ export const presets = {
     uWarp: 1.15,
     uGlow: 0.85,
     uSeed: 11,
+    uMetalness: 0.08,
+    uRoughness: 0.42,
+    uEnv: 1.05,
+    uEmissive: 0.35,
   },
   lava: {
     shader: "lava",
@@ -236,6 +315,10 @@ export const presets = {
     uWarp: 1.4,
     uGlow: 1.1,
     uSeed: 3,
+    uMetalness: 0.22,
+    uRoughness: 0.52,
+    uEnv: 0.9,
+    uEmissive: 0.85,
   },
   ocean: {
     shader: "ocean",
@@ -249,6 +332,10 @@ export const presets = {
     uWarp: 1.0,
     uGlow: 0.7,
     uSeed: 21,
+    uMetalness: 0.38,
+    uRoughness: 0.22,
+    uEnv: 1.2,
+    uEmissive: 0.22,
   },
   plasma: {
     shader: "plasma",
@@ -262,6 +349,10 @@ export const presets = {
     uWarp: 1.3,
     uGlow: 0.95,
     uSeed: 7,
+    uMetalness: 0.58,
+    uRoughness: 0.2,
+    uEnv: 1.25,
+    uEmissive: 0.55,
   },
   stars: {
     shader: "stars",
@@ -275,6 +366,10 @@ export const presets = {
     uWarp: 0.85,
     uGlow: 1.2,
     uSeed: 42,
+    uMetalness: 0.04,
+    uRoughness: 0.62,
+    uEnv: 0.85,
+    uEmissive: 0.4,
   },
   marble: {
     shader: "marble",
@@ -288,6 +383,10 @@ export const presets = {
     uWarp: 1.05,
     uGlow: 0.35,
     uSeed: 18,
+    uMetalness: 0.02,
+    uRoughness: 0.16,
+    uEnv: 1.35,
+    uEmissive: 0.06,
   },
   fire: {
     shader: "fire",
@@ -301,6 +400,10 @@ export const presets = {
     uWarp: 1.15,
     uGlow: 1.05,
     uSeed: 5,
+    uMetalness: 0.12,
+    uRoughness: 0.48,
+    uEnv: 0.95,
+    uEmissive: 0.92,
   },
   neon: {
     shader: "neon",
@@ -314,6 +417,10 @@ export const presets = {
     uWarp: 0.9,
     uGlow: 1.0,
     uSeed: 29,
+    uMetalness: 0.72,
+    uRoughness: 0.18,
+    uEnv: 1.3,
+    uEmissive: 0.7,
   },
 };
 
@@ -324,4 +431,8 @@ export const sliderDefs = [
   { key: "uContrast", label: "对比", min: 0.4, max: 2, step: 0.01 },
   { key: "uWarp", label: "扭曲", min: 0, max: 2.4, step: 0.01 },
   { key: "uGlow", label: "发光", min: 0, max: 2, step: 0.01 },
+  { key: "uMetalness", label: "金属度", min: 0, max: 1, step: 0.01 },
+  { key: "uRoughness", label: "粗糙度", min: 0, max: 1, step: 0.01 },
+  { key: "uEnv", label: "环境光", min: 0, max: 2.4, step: 0.01 },
+  { key: "uEmissive", label: "自发光", min: 0, max: 2, step: 0.01 },
 ];

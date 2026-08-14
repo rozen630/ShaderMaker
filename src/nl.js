@@ -1,4 +1,5 @@
 import { presets } from "./shaders.js";
+import { environments } from "./environments.js";
 
 const colorMap = {
   红: [0.86, 0.12, 0.16],
@@ -37,6 +38,7 @@ const colorMap = {
 };
 
 const presetHints = [
+  { id: "lookdev", keys: ["lookdev", "look dev", "校准", "标准灰", "灰卡", "macbeth", "色卡"] },
   { id: "lava", keys: ["岩浆", "熔岩", "火山", "lava", "molten", "magma"] },
   { id: "ocean", keys: ["海", "海洋", "水", "浪", "ocean", "sea", "water"] },
   { id: "aurora", keys: ["极光", "aurora", "northern"] },
@@ -148,6 +150,37 @@ export function interpretPrompt(raw, state) {
     next.uSeed = Math.floor(Math.random() * 200);
     notes.push("换了一组噪声种子");
   }
+  if (/更金属|金属感|metallic|more metal/.test(text)) {
+    next.uMetalness = nudge(next.uMetalness, 0.22, 0, 1);
+    next.uRoughness = nudge(next.uRoughness, -0.12, 0, 1);
+    notes.push("提高金属度");
+  }
+  if (/塑料|陶瓷|plastic|ceramic|less metal/.test(text)) {
+    next.uMetalness = nudge(next.uMetalness, -0.25, 0, 1);
+    notes.push("更像介质");
+  }
+  if (/更光滑|更亮泽|glossier|smoother|polish/.test(text)) {
+    next.uRoughness = nudge(next.uRoughness, -0.16, 0, 1);
+    next.uEnv = nudge(next.uEnv, 0.12, 0, 2.4);
+    notes.push("更光滑");
+  }
+  if (/更粗糙|磨砂|rougher|matte/.test(text)) {
+    next.uRoughness = nudge(next.uRoughness, 0.18, 0, 1);
+    notes.push("更粗糙");
+  }
+  if (/环境光|ibl/.test(text)) {
+    next.uEnv = nudge(next.uEnv, 0.2, 0, 2.4);
+    notes.push("加强环境光");
+  }
+
+  let environment = state.environment;
+  for (const env of Object.values(environments)) {
+    if (env.keys.some((key) => text.includes(key))) {
+      environment = env.id;
+      notes.push(`环境切到 ${env.name}`);
+      break;
+    }
+  }
 
   if (!notes.length) {
     return {
@@ -159,15 +192,16 @@ export function interpretPrompt(raw, state) {
   return {
     ok: true,
     shader,
+    environment,
     params: next,
     message: notes.join(" · "),
   };
 }
 
 export const hintPrompts = [
+  "回到 lookdev",
+  "切到日落环境",
+  "make it more metallic",
+  "换成夜景",
   "改成岩浆，慢一点",
-  "make it calmer and more purple",
-  "变成星空，再亮一点",
-  "加发光，纹路细一点",
-  "冻结动画",
 ];

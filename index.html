@@ -2,13 +2,14 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ShaderMaker</title>
   <link rel="stylesheet" href="./styles.css" />
   <script type="importmap">
     {
       "imports": {
-        "three": "https://unpkg.com/three@0.170.0/build/three.module.js"
+        "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
       }
     }
   </script>
@@ -25,7 +26,7 @@
       </div>
     </div>
     <div class="status">
-      <span id="shader-name">Aurora Drift</span>
+      <span id="shader-name">PBR Lookdev</span>
       <span id="compile-state" class="ok">ready</span>
     </div>
   </header>
@@ -34,6 +35,11 @@
     <section>
       <h2>预设</h2>
       <div id="presets" class="chips"></div>
+    </section>
+
+    <section>
+      <h2>环境</h2>
+      <div id="environments" class="chips"></div>
     </section>
 
     <section>
