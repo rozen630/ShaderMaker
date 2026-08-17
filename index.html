@@ -31,26 +31,31 @@
     </div>
   </header>
 
-  <aside class="dock">
+  <aside class="dock dock-left">
+    <section>
+      <h2 id="parameter-title">PBR 参数</h2>
+      <div id="sliders" class="sliders"></div>
+    </section>
+  </aside>
+
+  <aside class="dock dock-environment">
+    <section>
+      <h2>环境</h2>
+      <div id="environments" class="chips"></div>
+    </section>
+  </aside>
+
+  <aside class="dock dock-right">
     <div id="mode-tabs" class="mode-tabs" role="tablist">
       <button type="button" class="mode-tab active" data-mode="pbr">PBR</button>
       <button type="button" class="mode-tab" data-mode="shader">Shader</button>
     </div>
 
     <section>
-      <h2>预设</h2>
+      <h2 id="preset-title">预设</h2>
       <div id="presets" class="chips"></div>
     </section>
 
-    <section>
-      <h2>环境</h2>
-      <div id="environments" class="chips"></div>
-    </section>
-
-    <section>
-      <h2>参数</h2>
-      <div id="sliders" class="sliders"></div>
-    </section>
   </aside>
 
   <footer class="composer">

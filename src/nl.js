@@ -39,9 +39,30 @@ const colorMap = {
 
 const presetHints = [
   { id: "lookdev", keys: ["lookdev", "look dev", "校准", "灰卡", "macbeth", "色卡"] },
+  { id: "brushedSteel", keys: ["拉丝钢", "拉丝金属", "brushed steel", "brushed metal"] },
+  { id: "frostedGlass", keys: ["磨砂玻璃", "雾面玻璃", "frosted glass"] },
+  { id: "amberGlass", keys: ["琥珀玻璃", "茶色玻璃", "amber glass"] },
+  { id: "glossyPlastic", keys: ["亮面塑料", "光面塑料", "glossy plastic"] },
+  { id: "mattePlastic", keys: ["哑光塑料", "磨砂塑料", "matte plastic"] },
+  { id: "carPaint", keys: ["车漆", "汽车漆", "car paint"] },
+  { id: "soapFilm", keys: ["薄膜虹彩", "肥皂膜", "油膜", "soap film", "thin film"] },
   { id: "chrome", keys: ["铬", "chrome", "镜子", "mirror"] },
   { id: "gray", keys: ["灰球", "标准灰", "18%灰", "gray ball", "grey ball"] },
+  { id: "aluminum", keys: ["铝", "铝合金", "aluminum", "aluminium"] },
+  { id: "steel", keys: ["钢", "钢材", "steel"] },
+  { id: "copper", keys: ["铜", "紫铜", "copper"] },
   { id: "gold", keys: ["金球", "黄金球", "gold ball"] },
+  { id: "titanium", keys: ["钛", "钛金属", "titanium"] },
+  { id: "rubber", keys: ["橡胶", "rubber"] },
+  { id: "ceramic", keys: ["陶瓷", "瓷器", "ceramic", "porcelain"] },
+  { id: "lacquer", keys: ["烤漆", "漆面", "lacquer"] },
+  { id: "pearl", keys: ["珍珠", "珠光", "pearl"] },
+  { id: "velvet", keys: ["丝绒", "天鹅绒", "velvet"] },
+  { id: "satin", keys: ["缎面", "丝绸", "satin", "silk"] },
+  { id: "leather", keys: ["皮革", "皮质", "leather"] },
+  { id: "water", keys: ["水球", "清水", "water material"] },
+  { id: "acrylic", keys: ["亚克力", "有机玻璃", "acrylic"] },
+  { id: "diamond", keys: ["钻石", "水晶", "diamond", "crystal"] },
   { id: "glass", keys: ["玻璃球", "玻璃", "glass"] },
   { id: "lava", keys: ["岩浆", "熔岩", "火山", "lava", "molten", "magma"] },
   { id: "ocean", keys: ["海", "海洋", "水", "浪", "ocean", "sea", "water"] },
@@ -103,6 +124,7 @@ export function interpretPrompt(raw, state) {
     next.uColorB = colors[0].rgb;
     next.uAccent = mixColor(colors[0].rgb, [1, 1, 1], 0.35);
     next.uColorA = mixColor(colors[0].rgb, [0.02, 0.02, 0.03], 0.7);
+    if (next.uTransmission > 0.4) next.uAttenuationColor = colors[0].rgb;
     notes.push(`颜色偏向 ${colors[0].name}`);
   }
 
@@ -178,21 +200,46 @@ export function interpretPrompt(raw, state) {
     next.uEnv = nudge(next.uEnv, 0.2, 0, 2.4);
     notes.push("加强环境光");
   }
-  if (/清漆|车漆|clearcoat|coat/.test(text)) {
+  if (/清漆|车漆|clearcoat|coat/.test(text) && !/去掉清漆|不要清漆|无清漆|remove clearcoat|no clearcoat/.test(text)) {
     next.uClearcoat = nudge(next.uClearcoat, 0.28, 0, 1);
     next.uClearcoatRoughness = nudge(next.uClearcoatRoughness, -0.08, 0, 1);
     notes.push("加强清漆");
+  }
+  if (/去掉清漆|不要清漆|无清漆|remove clearcoat|no clearcoat/.test(text)) {
+    next.uClearcoat = 0;
+    notes.push("去掉清漆");
   }
   if (/布|织物|丝绒|sheen|velvet|cloth/.test(text)) {
     next.uSheen = nudge(next.uSheen, 0.3, 0, 1);
     next.uMetalness = nudge(next.uMetalness, -0.2, 0, 1);
     notes.push("加织物光泽");
   }
+  if (/虹彩|珠光|变彩|iridescent|iridescence/.test(text)) {
+    next.uIridescence = nudge(next.uIridescence, 0.35, 0, 1);
+    notes.push("加强虹彩薄膜");
+  }
   if (/透明|透射|transmission/.test(text) && !/玻璃|glass/.test(text)) {
     next.uTransmission = nudge(next.uTransmission, 0.35, 0, 1);
     next.uMetalness = 0;
     next.uRoughness = nudge(next.uRoughness, -0.18, 0, 1);
     notes.push("提高透射");
+  }
+  if (/更厚|厚一点|thicker/.test(text)) {
+    next.uThickness = nudge(next.uThickness, 0.2, 0, 2);
+    notes.push("增加体积厚度");
+  }
+  if (/更薄|薄一点|thinner/.test(text) && !/薄膜/.test(text)) {
+    next.uThickness = nudge(next.uThickness, -0.2, 0, 2);
+    notes.push("减小体积厚度");
+  }
+  if (/色散|彩虹折射|dispersion/.test(text)) {
+    next.uDispersion = nudge(next.uDispersion, 0.3, 0, 1);
+    next.uTransmission = Math.max(next.uTransmission, 0.75);
+    notes.push("增加色散");
+  }
+  if (/吸收|染色玻璃|体积颜色|attenuation|absorption/.test(text)) {
+    next.uAttenuationDistance = nudge(next.uAttenuationDistance, -0.5, 0.05, 10);
+    notes.push("加强体积吸收");
   }
   if (/折射率|ior/.test(text)) {
     next.uIor = nudge(next.uIor, 0.12, 1, 2.33);
@@ -202,6 +249,10 @@ export function interpretPrompt(raw, state) {
     next.uAnisotropy = nudge(next.uAnisotropy, 0.28, 0, 1);
     next.uMetalness = nudge(next.uMetalness, 0.18, 0, 1);
     notes.push("加各向异性");
+  }
+  if (/镜面|高光|specular/.test(text)) {
+    next.uSpecularIntensity = nudge(next.uSpecularIntensity, 0.2, 0, 2);
+    notes.push("加强镜面反射");
   }
   if (/法线|凹凸|normal|bump/.test(text)) {
     next.uNormal = nudge(next.uNormal, 0.25, 0, 2);
@@ -235,6 +286,6 @@ export function interpretPrompt(raw, state) {
 }
 
 export const hintPrompts = {
-  pbr: ["回到 lookdev", "切到铬球", "换成玻璃", "切到日落环境", "加一层清漆"],
+  pbr: ["回到 lookdev", "换成拉丝钢", "换成磨砂玻璃", "做成珍珠虹彩", "增加色散"],
   shader: ["改成岩浆，慢一点", "改成星空", "make it calmer and more purple", "冻结动画"],
 };

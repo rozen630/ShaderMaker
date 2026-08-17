@@ -108,12 +108,37 @@ body {
 
 .dock {
   top: 92px;
-  right: 18px;
-  width: min(320px, calc(100vw - 36px));
   max-height: calc(100vh - 210px);
   overflow: auto;
   padding: 16px;
   border-radius: 22px;
+}
+
+.dock-left {
+  left: 18px;
+  width: min(300px, calc(50vw - 36px));
+}
+
+.dock-right {
+  right: 18px;
+  width: min(320px, calc(50vw - 36px));
+}
+
+.dock-environment {
+  left: 50%;
+  width: min(520px, calc(100vw - 700px));
+  transform: translateX(-50%);
+}
+
+.dock-environment section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dock-environment h2 {
+  flex: none;
+  margin: 0;
 }
 
 .mode-tabs {
@@ -163,6 +188,49 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.preset-library {
+  display: grid;
+  gap: 14px;
+}
+
+.pbr-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.category-chip {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.category-chip:hover,
+.category-chip.active {
+  color: var(--text);
+  border-color: rgba(142, 231, 197, 0.45);
+  background: rgba(142, 231, 197, 0.14);
+}
+
+.preset-category {
+  display: grid;
+  gap: 7px;
+}
+
+.preset-category h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
 }
 
 .preset-balls {

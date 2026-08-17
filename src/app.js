@@ -2,14 +2,23 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { vertexShader, shaders, presets, sliderGroups, channelShaders } from "./shaders.js";
+import {
+  vertexShader,
+  shaders,
+  presets,
+  pbrCategories,
+  sliderGroups,
+  channelShaders,
+} from "./shaders.js";
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 
 const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
+const presetTitle = document.getElementById("preset-title");
 const envRoot = document.getElementById("environments");
 const sliderRoot = document.getElementById("sliders");
+const parameterTitle = document.getElementById("parameter-title");
 const hintRoot = document.getElementById("hints");
 const form = document.getElementById("prompt-form");
 const promptInput = document.getElementById("prompt");
@@ -226,7 +235,16 @@ const cubeMaterial = new THREE.MeshPhysicalMaterial({
   transmission: 0,
   ior: 1.5,
   thickness: 0.5,
+  attenuationDistance: 10,
+  attenuationColor: new THREE.Color(0xffffff),
+  dispersion: 0,
+  iridescence: 0,
+  iridescenceIOR: 1.3,
+  iridescenceThicknessRange: [100, 400],
+  specularIntensity: 1,
+  specularColor: new THREE.Color(0xffffff),
   anisotropy: 0,
+  anisotropyRotation: 0,
   opacity: 1,
 });
 
@@ -241,6 +259,7 @@ scene.add(subject);
 
 const state = {
   mode: "pbr",
+  pbrCategory: "all",
   preset: "lookdev",
   shader: "lookdev",
   environment: defaultEnvironment,
@@ -353,11 +372,20 @@ function applyPhysical(params) {
   cubeMaterial.clearcoatRoughness = params.uClearcoatRoughness;
   cubeMaterial.sheen = params.uSheen;
   cubeMaterial.sheenRoughness = params.uSheenRoughness;
-  cubeMaterial.sheenColor.setRGB(...params.uAccent);
+  cubeMaterial.sheenColor.setRGB(...params.uSheenColor);
   cubeMaterial.transmission = params.uTransmission;
   cubeMaterial.ior = params.uIor;
   cubeMaterial.thickness = params.uThickness;
+  cubeMaterial.attenuationDistance = params.uAttenuationDistance;
+  cubeMaterial.attenuationColor.setRGB(...params.uAttenuationColor);
+  cubeMaterial.dispersion = params.uDispersion;
+  cubeMaterial.iridescence = params.uIridescence;
+  cubeMaterial.iridescenceIOR = params.uIridescenceIor;
+  cubeMaterial.iridescenceThicknessRange = [100, params.uIridescenceThickness];
+  cubeMaterial.specularIntensity = params.uSpecularIntensity;
+  cubeMaterial.specularColor.setRGB(...params.uSpecularColor);
   cubeMaterial.anisotropy = params.uAnisotropy;
+  cubeMaterial.anisotropyRotation = params.uAnisotropyRotation;
   cubeMaterial.normalScale.setScalar(mapped && state.shader !== "lookdev" ? params.uNormal : 0);
   cubeMaterial.map = mapped ? albedoTarget.texture : null;
   cubeMaterial.roughnessMap = mapped ? ormTarget.texture : null;
@@ -470,40 +498,99 @@ function orbStyle(preset) {
   const light = rgbCss(preset.uAccent);
   const glass = (preset.uTransmission || 0) > 0.4;
   const metal = (preset.uMetalness || 0) > 0.6;
+  const iridescent = (preset.uIridescence || 0) > 0.4;
   const shine = metal ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)";
-  const fill = glass
+  const fill = iridescent
+    ? `radial-gradient(circle at 30% 25%, rgba(255,255,255,0.95), #6de7ff 25%, ${mid} 48%, #ff72cf 70%, ${dark})`
+    : glass
     ? `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.85), ${mid} 38%, rgba(180,210,230,0.28) 70%, rgba(255,255,255,0.2))`
     : `radial-gradient(circle at 32% 28%, ${shine}, ${mid} 42%, ${dark} 100%)`;
   return `background:${fill};`;
 }
 
-function renderPresets() {
-  presetRoot.innerHTML = "";
-  presetRoot.className = state.mode === "pbr" ? "preset-balls" : "chips";
-  for (const [id, preset] of presetsForMode()) {
+function createPresetButton(id, preset) {
+  const button = document.createElement("button");
+  button.type = "button";
+  const label = preset.name || shaders[preset.shader].name;
+  if (state.mode === "pbr") {
+    button.className = "preset-ball";
+    button.innerHTML = `<span class="orb" style="${orbStyle(preset)}"></span><em>${label}</em>`;
+  } else {
+    button.className = "chip";
+    button.textContent = label;
+  }
+  button.dataset.id = id;
+  button.addEventListener("click", () => {
+    setPreset(id, preset);
+    logEl.textContent = `已切换到 ${label}`;
+  });
+  return button;
+}
+
+function createPbrCategoryTabs(entries) {
+  const tabs = document.createElement("div");
+  tabs.className = "pbr-category-tabs";
+  const categories = [{ id: "all", label: "全部" }, ...pbrCategories];
+  for (const category of categories) {
+    const count =
+      category.id === "all"
+        ? entries.length
+        : entries.filter(([, preset]) => preset.category === category.id).length;
+    if (!count) continue;
     const button = document.createElement("button");
     button.type = "button";
-    const label = preset.name || shaders[preset.shader].name;
-    if (state.mode === "pbr") {
-      button.className = "preset-ball";
-      button.innerHTML = `<span class="orb" style="${orbStyle(preset)}"></span><em>${label}</em>`;
-    } else {
-      button.className = "chip";
-      button.textContent = label;
-    }
-    button.dataset.id = id;
+    button.className = "category-chip";
+    button.classList.toggle("active", state.pbrCategory === category.id);
+    button.textContent = `${category.label} ${count}`;
     button.addEventListener("click", () => {
-      setPreset(id, preset);
-      logEl.textContent = `已切换到 ${label}`;
+      state.pbrCategory = category.id;
+      renderPresets();
+      highlightPreset();
     });
-    presetRoot.append(button);
+    tabs.append(button);
+  }
+  return tabs;
+}
+
+function renderPresets() {
+  presetRoot.innerHTML = "";
+  const entries = presetsForMode();
+  if (presetTitle) presetTitle.textContent = state.mode === "pbr" ? `PBR 材质库 · ${entries.length}` : `Shader 预设 · ${entries.length}`;
+  if (state.mode === "pbr") {
+    presetRoot.className = "preset-library";
+    presetRoot.append(createPbrCategoryTabs(entries));
+    for (const category of pbrCategories) {
+      if (state.pbrCategory !== "all" && state.pbrCategory !== category.id) continue;
+      const categoryEntries = entries.filter(([, preset]) => preset.category === category.id);
+      if (!categoryEntries.length) continue;
+      const group = document.createElement("div");
+      group.className = "preset-category";
+      group.innerHTML = `<h3>${category.label}</h3>`;
+      const balls = document.createElement("div");
+      balls.className = "preset-balls";
+      for (const [id, preset] of categoryEntries) balls.append(createPresetButton(id, preset));
+      group.append(balls);
+      presetRoot.append(group);
+    }
+  } else {
+    presetRoot.className = "chips";
+    for (const [id, preset] of entries) presetRoot.append(createPresetButton(id, preset));
   }
 }
 
 function renderSliders() {
   sliderRoot.innerHTML = "";
+  if (parameterTitle) parameterTitle.textContent = state.mode === "pbr" ? "PBR 参数" : "Shader 参数";
   for (const group of slidersForMode()) {
+    let currentSection = "";
     for (const def of group.items) {
+      if (def.section && def.section !== currentSection) {
+        currentSection = def.section;
+        const heading = document.createElement("div");
+        heading.className = "slider-group";
+        heading.textContent = currentSection;
+        sliderRoot.append(heading);
+      }
       const wrap = document.createElement("div");
       wrap.className = "slider";
       wrap.innerHTML = `
