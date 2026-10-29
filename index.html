@@ -4,77 +4,52 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ShaderMaker</title>
-  <link rel="stylesheet" href="./styles.css?v=20261029-vx3" />
+  <link rel="stylesheet" href="./styles.css?v=20261029-ui1" />
   <!-- 本地模块带版本号，避免浏览器拿旧缓存配新页面 -->
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
         "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/",
-        "./src/shaders.js": "./src/shaders.js?v=20261029-vx3",
-        "./src/presets.js": "./src/presets.js?v=20261029-vx3",
-        "./src/npr.js": "./src/npr.js?v=20261029-vx3",
-        "./src/stylize.js": "./src/stylize.js?v=20261029-vx3",
-        "./src/nl.js": "./src/nl.js?v=20261029-vx3",
-        "./src/environments.js": "./src/environments.js?v=20261029-vx3",
-        "./src/models.js": "./src/models.js?v=20261029-vx3",
-        "./src/voxel.js": "./src/voxel.js?v=20261029-vx3"
+        "./src/shaders.js": "./src/shaders.js?v=20261029-ui1",
+        "./src/presets.js": "./src/presets.js?v=20261029-ui1",
+        "./src/npr.js": "./src/npr.js?v=20261029-ui1",
+        "./src/stylize.js": "./src/stylize.js?v=20261029-ui1",
+        "./src/nl.js": "./src/nl.js?v=20261029-ui1",
+        "./src/environments.js": "./src/environments.js?v=20261029-ui1",
+        "./src/models.js": "./src/models.js?v=20261029-ui1",
+        "./src/voxel.js": "./src/voxel.js?v=20261029-ui1"
       }
     }
   </script>
 </head>
-<body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="mark"></span>
-      <strong>ShaderMaker</strong>
-    </div>
-    <div class="render-switch">
-      <div id="render-modes" class="segmented" role="tablist">
-        <button type="button" data-render="pbr" class="active">PBR 写实</button>
-        <button type="button" data-render="npr">NPR 风格化</button>
-      </div>
-      <div id="npr-presets" class="segmented segmented-sub" hidden></div>
-      <div class="scope-switch" title="NPR 与画面滤镜的作用范围">
-        <span>作用于</span>
-        <div id="scope-modes" class="segmented segmented-mini">
-          <button type="button" data-scope="subject" class="active">仅模型</button>
-          <button type="button" data-scope="global">全局</button>
-        </div>
-      </div>
-    </div>
-    <div class="status">
-      <span id="shader-name">PBR Lookdev</span>
-      <span id="compile-state" class="ok">ready</span>
-    </div>
-  </header>
-
-  <aside class="panel panel-library">
-    <div id="mode-tabs" class="segmented segmented-wide" role="tablist">
-      <button type="button" class="mode-tab active" data-mode="pbr">PBR 材质</button>
-      <button type="button" class="mode-tab" data-mode="shader">Shader</button>
-    </div>
-    <div class="panel-head">
-      <h2 id="preset-title">预设</h2>
-      <button id="random-variant" type="button" class="ghost-button" hidden>随机变体</button>
-    </div>
-    <div class="panel-scroll">
-      <div id="presets"></div>
-    </div>
-  </aside>
-
+<body data-tier="lite">
+  <!-- 沉浸式画布：模型占满整个画面，控制项是浮在上面的半透明面板（窄屏时依次排到画面下方） -->
   <main class="viewport">
     <canvas id="stage"></canvas>
-    <div class="viewport-toolbar">
-      <div class="viewport-group">
-        <span>模型</span>
-        <div id="shape-modes" class="segmented segmented-mini"></div>
+
+    <header class="hud">
+      <div class="brand">
+        <span class="mark"></span>
+        <strong>ShaderMaker</strong>
+        <span id="shader-name" class="look-name"></span>
+        <span id="compile-state" class="ok">ready</span>
       </div>
-      <div id="channel-section" class="viewport-group">
-        <span>通道</span>
-        <div id="channels" class="segmented segmented-mini"></div>
+      <div class="hud-center">
+        <div id="render-modes" class="segmented">
+          <button type="button" data-render="pbr" class="active">写实</button>
+          <button type="button" data-render="npr">卡通</button>
+        </div>
+        <div id="npr-presets" class="segmented" hidden></div>
       </div>
-    </div>
+      <div class="hud-end">
+        <div id="tier-modes" class="segmented tier" title="Lite 只留常用控制项，Pro 显示全部参数">
+          <button type="button" data-tier="lite" class="active">Lite</button>
+          <button type="button" data-tier="pro">Pro</button>
+        </div>
+      </div>
+    </header>
+
     <footer class="composer">
       <div id="hints" class="hints"></div>
       <form id="prompt-form">
@@ -83,25 +58,69 @@
           type="text"
           autocomplete="off"
           spellcheck="false"
-          placeholder="用一句话改效果：换成科幻面板，二次元，切到日落"
+          placeholder="描述想要的效果，例如：生锈的铜，卡通描边"
         />
-        <button type="submit">应用</button>
+        <button type="submit" aria-label="应用">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" /></svg>
+        </button>
       </form>
-      <p id="nl-log" class="nl-log">试试：改成锈铁 / 赛璐璐，描边粗一点 / 像素风 / 回到写实</p>
+      <p id="nl-log" class="nl-log"></p>
     </footer>
   </main>
 
+  <aside class="panel panel-library">
+    <div id="mode-tabs" class="segmented segmented-wide" role="tablist">
+      <button type="button" class="mode-tab active" data-mode="pbr">PBR 材质</button>
+      <button type="button" class="mode-tab" data-mode="shader">Shader</button>
+    </div>
+    <div class="panel-head">
+      <h2 id="preset-title">材质</h2>
+      <button id="random-variant" type="button" class="text-button" hidden>随机变体</button>
+    </div>
+    <div class="panel-scroll">
+      <div id="presets"></div>
+    </div>
+  </aside>
+
   <aside class="panel panel-inspector">
     <div class="panel-scroll">
-      <section class="inspector-section">
-        <div class="panel-head">
+      <section class="section">
+        <h2>展示模型</h2>
+        <div id="shape-modes" class="segmented segmented-fill"></div>
+      </section>
+
+      <section class="section">
+        <h2>环境</h2>
+        <div id="environments" class="swatches"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>画面滤镜</h2>
+          <div class="look-amount pro-only" title="滤镜强度">
+            <input id="style-amount" type="range" min="0" max="1" step="0.01" value="1" />
+            <span id="style-amount-value">100%</span>
+          </div>
+        </div>
+        <div id="styles" class="chips"></div>
+        <div class="row pro-only" title="卡通渲染与画面滤镜的作用范围">
+          <span>作用范围</span>
+          <div id="scope-modes" class="segmented segmented-mini">
+            <button type="button" data-scope="subject" class="active">仅模型</button>
+            <button type="button" data-scope="global">全局</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
           <h2>体素化</h2>
           <label class="switch" title="Teardown 式体素：材质按块取色，带体素 AO">
             <input id="voxel-toggle" type="checkbox" />
             <span></span>
           </label>
         </div>
-        <div class="slider">
+        <div class="slider voxel-slider">
           <label>
             <b>精细度</b>
             <span id="voxel-resolution-value">48</span>
@@ -109,27 +128,19 @@
           <input id="voxel-resolution" type="range" min="12" max="96" step="2" value="48" disabled />
         </div>
       </section>
-      <section class="inspector-section">
-        <h2>环境</h2>
-        <div id="environments" class="option-grid"></div>
-      </section>
-      <section class="inspector-section">
-        <div class="panel-head">
-          <h2>画面滤镜</h2>
-          <div class="look-amount" title="滤镜强度">
-            <input id="style-amount" type="range" min="0" max="1" step="0.01" value="1" />
-            <span id="style-amount-value">100%</span>
-          </div>
-        </div>
-        <div id="styles" class="option-grid"></div>
-      </section>
-      <section class="inspector-section">
-        <h2 id="parameter-title">PBR 参数</h2>
+
+      <section class="section">
+        <h2 id="parameter-title">调节</h2>
         <div id="sliders" class="sliders"></div>
+      </section>
+
+      <section id="channel-section" class="section pro-only">
+        <h2>通道检查</h2>
+        <div id="channels" class="segmented segmented-mini segmented-wrap"></div>
       </section>
     </div>
   </aside>
 
-  <script type="module" src="./src/app.js?v=20261029-vx3"></script>
+  <script type="module" src="./src/app.js?v=20261029-ui1"></script>
 </body>
 </html>

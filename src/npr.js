@@ -56,17 +56,18 @@ export const nprPresets = {
 
 export const defaultNprPreset = "anime";
 
+// lite: true 的在 Lite 模式显示
 export const nprSliders = [
   { section: "明暗", key: "steps", label: "色阶", min: 1, max: 4, step: 1 },
   { key: "threshold", label: "明暗交界", min: 0, max: 0.9, step: 0.01 },
   { key: "softness", label: "交界软硬", min: 0, max: 0.3, step: 0.005 },
-  { key: "shadowLevel", label: "阴影亮度", min: 0, max: 1, step: 0.01 },
+  { key: "shadowLevel", lite: true, label: "阴影亮度", min: 0, max: 1, step: 0.01 },
   { key: "shadowHue", label: "阴影冷暖", min: -1, max: 1, step: 0.01 },
   { section: "高光与轮廓", key: "specSize", label: "高光大小", min: 0.2, max: 2.5, step: 0.01 },
   { key: "specStrength", label: "高光强度", min: 0, max: 2, step: 0.01 },
   { key: "rim", label: "边缘光", min: 0, max: 1.5, step: 0.01 },
   { key: "rimWidth", label: "边缘光宽度", min: 0.05, max: 0.8, step: 0.01 },
-  { key: "outline", label: "描边粗细", min: 0, max: 0.04, step: 0.001 },
+  { key: "outline", lite: true, label: "描边粗细", min: 0, max: 0.04, step: 0.001 },
   { key: "outlineTint", label: "描边染色", min: 0, max: 1, step: 0.01 },
 ];
 

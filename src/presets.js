@@ -652,18 +652,19 @@ export const presets = {
   }),
 };
 
+// lite: true 的滑条在 Lite 模式显示（每组 3 个最常调的），Pro 显示全部
 export const sliderGroups = [
   {
     id: "surface",
     label: "Surface",
     items: [
-      { section: "图案", key: "uSpeed", label: "速度", min: 0, max: 2, step: 0.01 },
-      { key: "uScale", label: "尺度", min: 0.4, max: 5, step: 0.01 },
+      { section: "图案", key: "uSpeed", lite: true, label: "速度", min: 0, max: 2, step: 0.01 },
+      { key: "uScale", lite: true, label: "尺度", min: 0.4, max: 5, step: 0.01 },
       { key: "uIntensity", label: "亮度", min: 0.3, max: 2, step: 0.01 },
       { key: "uContrast", label: "对比", min: 0.4, max: 2, step: 0.01 },
       { key: "uWarp", label: "扭曲", min: 0, max: 2.4, step: 0.01 },
       { key: "uGlow", label: "发光纹理", min: 0, max: 2, step: 0.01 },
-      { section: "PBR 表面", key: "uRoughness", label: "粗糙度", min: 0, max: 1, step: 0.01 },
+      { section: "PBR 表面", key: "uRoughness", lite: true, label: "粗糙度", min: 0, max: 1, step: 0.01 },
       { key: "uMetalness", label: "金属度", min: 0, max: 1, step: 0.01 },
       { key: "uNormal", label: "法线强度", min: 0, max: 2, step: 0.01 },
       { key: "uEmissive", label: "自发光", min: 0, max: 2, step: 0.01 },
@@ -675,25 +676,25 @@ export const sliderGroups = [
     id: "shader",
     label: "Shader",
     items: [
-      { key: "uSpeed", label: "速度", min: 0, max: 2, step: 0.01 },
-      { key: "uScale", label: "尺度", min: 0.4, max: 5, step: 0.01 },
+      { key: "uSpeed", lite: true, label: "速度", min: 0, max: 2, step: 0.01 },
+      { key: "uScale", lite: true, label: "尺度", min: 0.4, max: 5, step: 0.01 },
       { key: "uIntensity", label: "亮度", min: 0.3, max: 2, step: 0.01 },
       { key: "uContrast", label: "对比", min: 0.4, max: 2, step: 0.01 },
       { key: "uWarp", label: "扭曲", min: 0, max: 2.4, step: 0.01 },
-      { key: "uGlow", label: "发光", min: 0, max: 2, step: 0.01 },
+      { key: "uGlow", lite: true, label: "发光", min: 0, max: 2, step: 0.01 },
     ],
   },
   {
     id: "pbr",
     label: "PBR",
     items: [
-      { section: "基础", key: "uMetalness", label: "金属度", min: 0, max: 1, step: 0.01 },
-      { key: "uRoughness", label: "粗糙度", min: 0, max: 1, step: 0.01 },
+      { section: "基础", key: "uMetalness", lite: true, label: "金属度", min: 0, max: 1, step: 0.01 },
+      { key: "uRoughness", lite: true, label: "粗糙度", min: 0, max: 1, step: 0.01 },
       { key: "uEnv", label: "环境光", min: 0, max: 2.4, step: 0.01 },
       { key: "uSpecularIntensity", label: "镜面强度", min: 0, max: 2, step: 0.01 },
       { key: "uIor", label: "折射率", min: 1, max: 2.33, step: 0.01 },
       { key: "uEmissive", label: "自发光", min: 0, max: 2, step: 0.01 },
-      { section: "表层", key: "uClearcoat", label: "清漆", min: 0, max: 1, step: 0.01 },
+      { section: "表层", key: "uClearcoat", lite: true, label: "清漆", min: 0, max: 1, step: 0.01 },
       { key: "uClearcoatRoughness", label: "清漆粗糙", min: 0, max: 1, step: 0.01 },
       { key: "uSheen", label: "织物光泽", min: 0, max: 1, step: 0.01 },
       { key: "uSheenRoughness", label: "织物粗糙", min: 0.07, max: 1, step: 0.01 },

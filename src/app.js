@@ -28,6 +28,7 @@ const shapeRoot = document.getElementById("shape-modes");
 const voxelToggle = document.getElementById("voxel-toggle");
 const voxelSlider = document.getElementById("voxel-resolution");
 const voxelValue = document.getElementById("voxel-resolution-value");
+const tierRoot = document.getElementById("tier-modes");
 const sliderRoot = document.getElementById("sliders");
 const parameterTitle = document.getElementById("parameter-title");
 const hintRoot = document.getElementById("hints");
@@ -268,7 +269,18 @@ let voxelGroup = null;
 const voxelCache = new Map();
 
 
+// Lite / Pro：只决定界面显示多少控制项，材质和设置在两种模式间保留
+const TIER_KEY = "shadermaker.tier";
+function savedTier() {
+  try {
+    return localStorage.getItem(TIER_KEY) === "pro" ? "pro" : "lite";
+  } catch {
+    return "lite";
+  }
+}
+
 const state = {
+  tier: savedTier(),
   mode: "pbr",
   pbrCategory: "all",
   preset: "lookdev",
@@ -360,7 +372,17 @@ const nprGroup = { id: "npr", label: "NPR", items: nprSliders.map((def) => ({ ..
 function slidersForMode(mode = state.mode) {
   const groupId = mode === "shader" && shaders[state.shader]?.kind === "surface" ? "surface" : mode;
   const groups = sliderGroups.filter((group) => group.id === groupId);
-  return state.render === "npr" ? [nprGroup, ...groups] : groups;
+  const all = state.render === "npr" ? [nprGroup, ...groups] : groups;
+  if (state.tier === "pro") return all;
+  return all.map((group) => ({ ...group, items: group.items.filter((def) => def.lite) }));
+}
+
+// 滑条已拖过的部分用 --fill 着色
+function paintRange(input) {
+  const min = Number(input.min);
+  const max = Number(input.max);
+  const ratio = max > min ? (Number(input.value) - min) / (max - min) : 0;
+  input.style.setProperty("--fill", `${(THREE.MathUtils.clamp(ratio, 0, 1) * 100).toFixed(1)}%`);
 }
 
 function sliderValue(def) {
@@ -688,6 +710,7 @@ function syncVoxelControls() {
   if (voxelSlider) {
     voxelSlider.value = String(state.voxelRes);
     voxelSlider.disabled = !state.voxelOn;
+    paintRange(voxelSlider);
   }
   if (voxelValue) voxelValue.textContent = String(state.voxelRes);
 }
@@ -866,7 +889,7 @@ function updateTitle() {
   const preset = presets[state.preset];
   const base = state.params.name || preset?.name || shaders[state.shader]?.name || "";
   const parts = [base];
-  if (state.render === "npr") parts.push(`NPR ${nprPresets[state.nprPreset].name}`);
+  if (state.render === "npr") parts.push(`卡通 ${nprPresets[state.nprPreset].name}`);
   if (state.voxelOn) parts.push(`体素 ${state.voxelRes}`);
   if (state.style !== "none") parts.push(styles[state.style].name);
   nameEl.textContent = parts.join(" · ");
@@ -887,6 +910,7 @@ function syncSliders() {
       const value = sliderRoot.querySelector(`span[data-key="${def.key}"]`);
       if (!input || !value) continue;
       input.value = String(sliderValue(def));
+      paintRange(input);
       value.textContent = Number(sliderValue(def)).toFixed(def.step >= 1 ? 0 : def.step < 0.01 ? 3 : 2);
     }
   }
@@ -900,7 +924,10 @@ function renderEnvironments() {
     button.type = "button";
     button.className = "chip";
     button.dataset.id = env.id;
-    button.textContent = env.name;
+    // 色块：主光颜色 → 环境底色，一眼看出冷暖
+    const key = `#${env.key.color.toString(16).padStart(6, "0")}`;
+    const base = `#${env.background.toString(16).padStart(6, "0")}`;
+    button.innerHTML = `<i style="background:linear-gradient(135deg, ${key}, ${base} 70%)"></i><span>${env.name}</span>`;
     button.addEventListener("click", () => {
       setEnvironment(env.id);
       logEl.textContent = `环境切到 ${env.name}`;
@@ -988,7 +1015,8 @@ function renderPresets() {
     presetRoot.className = "preset-library";
     presetRoot.append(createPbrCategoryTabs(entries));
     for (const category of pbrCategories) {
-      if (state.pbrCategory !== "all" && state.pbrCategory !== category.id) continue;
+      const activeCategory = state.tier === "pro" ? state.pbrCategory : "all";
+      if (activeCategory !== "all" && activeCategory !== category.id) continue;
       const categoryEntries = entries.filter(([, preset]) => preset.category === category.id);
       if (!categoryEntries.length) continue;
       const group = document.createElement("div");
@@ -1030,18 +1058,20 @@ function renderSliders() {
   if (parameterTitle) {
     const surface = state.mode === "shader" && shaders[state.shader]?.kind === "surface";
     const material = state.mode === "pbr" ? "PBR 参数" : surface ? "Surface 参数" : "VFX 参数";
-    parameterTitle.textContent = state.render === "npr" ? `NPR 光照 · ${material}` : material;
+    if (state.tier === "lite") parameterTitle.textContent = "调节";
+    else parameterTitle.textContent = state.render === "npr" ? `卡通光照 · ${material}` : material;
   }
+  const pro = state.tier === "pro";
   for (const group of slidersForMode()) {
     let currentSection = "";
-    if (state.render === "npr" && group.id !== "npr") {
+    if (pro && state.render === "npr" && group.id !== "npr") {
       const divider = document.createElement("div");
       divider.className = "slider-divider";
       divider.textContent = "材质";
       sliderRoot.append(divider);
     }
     for (const def of group.items) {
-      if (def.section && def.section !== currentSection) {
+      if (pro && def.section && def.section !== currentSection) {
         currentSection = def.section;
         const heading = document.createElement("div");
         heading.className = "slider-group";
@@ -1059,6 +1089,7 @@ function renderSliders() {
       `;
       const input = wrap.querySelector("input");
       input.addEventListener("input", () => {
+        paintRange(input);
         if (def.npr) {
           npr.setValues({ [def.key]: Number(input.value) });
           applyPhysical(state.params);
@@ -1144,6 +1175,30 @@ function randomVariant() {
   logEl.textContent = `随机变体：色相旋转 ${Math.round(turn * 360)}°，种子 ${params.uSeed}`;
 }
 
+function setTier(tier) {
+  state.tier = tier === "pro" ? "pro" : "lite";
+  document.body.dataset.tier = state.tier;
+  try {
+    localStorage.setItem(TIER_KEY, state.tier);
+  } catch {
+    // 存不了就只在本次生效
+  }
+  for (const button of tierRoot?.querySelectorAll("[data-tier]") || []) {
+    button.classList.toggle("active", button.dataset.tier === state.tier);
+  }
+  // Lite 没有通道检查，切回最终画面
+  if (state.tier === "lite" && state.channel !== "final") setChannel("final");
+  renderPresets();
+  highlightPreset();
+  renderSliders();
+  syncSliders();
+}
+
+tierRoot?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-tier]");
+  if (button) setTier(button.dataset.tier);
+});
+
 randomButton?.addEventListener("click", randomVariant);
 
 scopeRoot?.addEventListener("click", (event) => {
@@ -1159,6 +1214,7 @@ voxelToggle?.addEventListener("change", () => setVoxel(voxelToggle.checked));
 let voxelFrame = 0;
 voxelSlider?.addEventListener("input", () => {
   if (voxelValue) voxelValue.textContent = voxelSlider.value;
+  paintRange(voxelSlider);
   cancelAnimationFrame(voxelFrame);
   voxelFrame = requestAnimationFrame(() => setVoxel(true, Number(voxelSlider.value)));
 });
@@ -1174,13 +1230,14 @@ renderModeRoot?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-render]");
   if (!button) return;
   setRender(button.dataset.render);
-  logEl.textContent = state.render === "npr" ? `切到 NPR · ${nprPresets[state.nprPreset].name}` : "切回 PBR 写实渲染";
+  logEl.textContent = state.render === "npr" ? `切到卡通 · ${nprPresets[state.nprPreset].name}` : "切回写实渲染";
 });
 
 styleAmountInput?.addEventListener("input", () => {
   const value = Number(styleAmountInput.value);
   stylizer.setAmount(value);
   styleAmountValue.textContent = `${Math.round(value * 100)}%`;
+  paintRange(styleAmountInput);
 });
 
 form.addEventListener("submit", (event) => {
@@ -1267,6 +1324,7 @@ document.getElementById("mode-tabs")?.addEventListener("click", (event) => {
   setMode(button.dataset.mode);
 });
 
+setTier(state.tier);
 renderEnvironments();
 renderStyles();
 renderChannels();
@@ -1309,6 +1367,7 @@ function getState() {
   }
   return {
     title: nameEl.textContent,
+    tier: state.tier,
     material: { id: state.preset, name: state.params.name || presets[state.preset]?.name || "", library: state.mode },
     render: state.render,
     nprPreset: state.nprPreset,
@@ -1327,7 +1386,10 @@ function getState() {
 function setStyleAmount(value) {
   const amount = THREE.MathUtils.clamp(Number(value), 0, 1);
   stylizer.setAmount(amount);
-  if (styleAmountInput) styleAmountInput.value = String(amount);
+  if (styleAmountInput) {
+    styleAmountInput.value = String(amount);
+    paintRange(styleAmountInput);
+  }
   if (styleAmountValue) styleAmountValue.textContent = `${Math.round(amount * 100)}%`;
 }
 
