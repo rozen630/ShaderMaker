@@ -60,6 +60,27 @@ void main() {`
 };
 calibrationMaterial.customProgramCacheKey = () => "shadermaker-calibration-1";
 
+// 与上面 GLSL 的 calibrationColor 同一套规则，供体素化时逐块取色（返回线性色）
+const CALIBRATION_CENTER = new THREE.Vector3(-0.049, 1.18, 0.066);
+const CALIBRATION_AXIS = new THREE.Vector3(0.0393, 0.7402, 0.6713).normalize();
+const CALIBRATION_U = new THREE.Vector3().crossVectors(CALIBRATION_AXIS, new THREE.Vector3(0, 0, 1)).normalize();
+const CALIBRATION_V = new THREE.Vector3().crossVectors(CALIBRATION_AXIS, CALIBRATION_U);
+const CALIBRATION_SWATCHES = [
+  [0.95, 0.95, 0.95], [0.78, 0.78, 0.78], [0.48, 0.48, 0.48], [0.2, 0.2, 0.2],
+  [0.78, 0.2, 0.2], [0.92, 0.52, 0.16], [0.93, 0.82, 0.22], [0.32, 0.64, 0.3],
+  [0.2, 0.64, 0.72], [0.22, 0.34, 0.72], [0.46, 0.3, 0.66], [0.78, 0.32, 0.62],
+];
+
+export function calibrationColor(local) {
+  if (local.y < 0.3) return new THREE.Color(0.42, 0.42, 0.42);
+  const dir = local.clone().sub(CALIBRATION_CENTER).normalize();
+  const theta = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(dir.dot(CALIBRATION_AXIS), -1, 1)));
+  if (theta < 15 || theta > 25.5) return new THREE.Color(0.18, 0.18, 0.18);
+  const phi = Math.atan2(dir.dot(CALIBRATION_V), dir.dot(CALIBRATION_U)) / (Math.PI * 2) + 0.5;
+  const [r, g, b] = CALIBRATION_SWATCHES[Math.min(Math.floor(phi * 12), 11)];
+  return new THREE.Color(r ** 2.2, g ** 2.2, b ** 2.2);
+}
+
 function primitiveGeometry(id) {
   let geometry = id === "cube" ? new RoundedBoxGeometry(0.9, 0.9, 0.9, 6, 0.09) : new THREE.SphereGeometry(0.62, 96, 64);
   // RoundedBoxGeometry 没有索引，computeTangents 需要先合并顶点

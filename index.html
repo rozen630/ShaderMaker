@@ -4,20 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ShaderMaker</title>
-  <link rel="stylesheet" href="./styles.css?v=20261029-ui7" />
+  <link rel="stylesheet" href="./styles.css?v=20261029-vx3" />
   <!-- 本地模块带版本号，避免浏览器拿旧缓存配新页面 -->
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
         "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/",
-        "./src/shaders.js": "./src/shaders.js?v=20261029-ui7",
-        "./src/presets.js": "./src/presets.js?v=20261029-ui7",
-        "./src/npr.js": "./src/npr.js?v=20261029-ui7",
-        "./src/stylize.js": "./src/stylize.js?v=20261029-ui7",
-        "./src/nl.js": "./src/nl.js?v=20261029-ui7",
-        "./src/environments.js": "./src/environments.js?v=20261029-ui7",
-        "./src/models.js": "./src/models.js?v=20261029-ui7"
+        "./src/shaders.js": "./src/shaders.js?v=20261029-vx3",
+        "./src/presets.js": "./src/presets.js?v=20261029-vx3",
+        "./src/npr.js": "./src/npr.js?v=20261029-vx3",
+        "./src/stylize.js": "./src/stylize.js?v=20261029-vx3",
+        "./src/nl.js": "./src/nl.js?v=20261029-vx3",
+        "./src/environments.js": "./src/environments.js?v=20261029-vx3",
+        "./src/models.js": "./src/models.js?v=20261029-vx3",
+        "./src/voxel.js": "./src/voxel.js?v=20261029-vx3"
       }
     }
   </script>
@@ -93,6 +94,22 @@
   <aside class="panel panel-inspector">
     <div class="panel-scroll">
       <section class="inspector-section">
+        <div class="panel-head">
+          <h2>体素化</h2>
+          <label class="switch" title="Teardown 式体素：材质按块取色，带体素 AO">
+            <input id="voxel-toggle" type="checkbox" />
+            <span></span>
+          </label>
+        </div>
+        <div class="slider">
+          <label>
+            <b>精细度</b>
+            <span id="voxel-resolution-value">48</span>
+          </label>
+          <input id="voxel-resolution" type="range" min="12" max="96" step="2" value="48" disabled />
+        </div>
+      </section>
+      <section class="inspector-section">
         <h2>环境</h2>
         <div id="environments" class="option-grid"></div>
       </section>
@@ -113,6 +130,6 @@
     </div>
   </aside>
 
-  <script type="module" src="./src/app.js?v=20261029-ui7"></script>
+  <script type="module" src="./src/app.js?v=20261029-vx3"></script>
 </body>
 </html>

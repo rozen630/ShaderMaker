@@ -118,7 +118,7 @@ export function interpretPrompt(raw, state) {
 
   const next = { ...state.params };
   // 描边粗细由 NPR 处理，不能误触发纹理尺度的「粗 / 细」
-  const patternText = text.replace(/描边[^，,。;；\s]*/g, "");
+  const patternText = text.replace(/(描边|体素)[^，,。;；\s]*/g, "").replace(/(粗|细)体素/g, "");
   const notes = [];
   let shader = state.shader;
   let presetId = state.preset || state.shader;
@@ -317,6 +317,22 @@ export function interpretPrompt(raw, state) {
     }
   }
 
+  // 体素：开 / 关 / 粗细
+  let voxel = null;
+  if (/关掉体素|取消体素|去掉体素|不要体素|no voxel/.test(text)) {
+    voxel = "off";
+    notes.push("关闭体素");
+  } else if (/体素更细|细体素|体素细一点|finer voxel/.test(text)) {
+    voxel = "fine";
+    notes.push("体素：细");
+  } else if (/体素更粗|粗体素|体素粗一点|coarser voxel|chunky/.test(text)) {
+    voxel = "coarse";
+    notes.push("体素：粗");
+  } else if (/体素|voxel|teardown/.test(text)) {
+    voxel = "on";
+    notes.push("体素化");
+  }
+
   let nprValues = null;
   if (/描边(更|再)?粗|粗描边|粗一点的描边|thicker outline/.test(text)) {
     nprValues = { outline: Math.min((state.nprValues?.outline ?? 0.012) + 0.008, 0.04) };
@@ -366,6 +382,7 @@ export function interpretPrompt(raw, state) {
     nprPreset,
     nprValues,
     displayModel,
+    voxel,
     params: next,
     message: notes.join(" · "),
   };
@@ -373,5 +390,5 @@ export function interpretPrompt(raw, state) {
 
 export const hintPrompts = {
   pbr: ["换成拉丝钢", "做成珍珠虹彩", "二次元渲染", "赛璐璐，描边粗一点", "厚涂，暖色阴影", "回到写实"],
-  shader: ["换成科幻面板", "改成锈铁，二次元", "全息，更蓝", "像素风", "漫画滤镜", "回到写实"],
+  shader: ["换成科幻面板", "岩浆，体素化", "改成锈铁，二次元", "全息，更蓝", "像素风", "回到写实"],
 };

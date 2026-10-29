@@ -8,7 +8,8 @@ import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 import { createStylizer, styles, defaultStyle, MASK_LAYER } from "./stylize.js";
 import { createNpr, nprPresets, nprSliders, defaultNprPreset } from "./npr.js";
-import { displayModels, defaultDisplayModel, loadDisplayModel } from "./models.js";
+import { displayModels, defaultDisplayModel, loadDisplayModel, calibrationColor } from "./models.js";
+import { voxelResolution, voxelPresets, applyVoxelSupport, voxelize, buildVoxelMesh } from "./voxel.js";
 
 const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
@@ -24,6 +25,9 @@ const renderModeRoot = document.getElementById("render-modes");
 const nprPresetRoot = document.getElementById("npr-presets");
 const scopeRoot = document.getElementById("scope-modes");
 const shapeRoot = document.getElementById("shape-modes");
+const voxelToggle = document.getElementById("voxel-toggle");
+const voxelSlider = document.getElementById("voxel-resolution");
+const voxelValue = document.getElementById("voxel-resolution-value");
 const sliderRoot = document.getElementById("sliders");
 const parameterTitle = document.getElementById("parameter-title");
 const hintRoot = document.getElementById("hints");
@@ -255,6 +259,14 @@ const npr = createNpr();
 const nprSubjectMaterial = npr.makeMaterial({ color: 0xffffff });
 nprSubjectMaterial.normalScale = cubeMaterial.normalScale;
 
+// 体素：PBR / NPR 材质都打上体素补丁（实例化时按每块的 voxelUv 取贴图），校色件体素用实例颜色
+applyVoxelSupport(cubeMaterial);
+applyVoxelSupport(nprSubjectMaterial);
+const voxelNeutralMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0 });
+applyVoxelSupport(voxelNeutralMaterial);
+let voxelGroup = null;
+const voxelCache = new Map();
+
 
 const state = {
   mode: "pbr",
@@ -264,6 +276,8 @@ const state = {
   environment: defaultEnvironment,
   style: defaultStyle,
   render: "pbr",
+  voxelOn: false,
+  voxelRes: voxelResolution.default,
   scope: "subject",
   displayModel: defaultDisplayModel,
   nprPreset: defaultNprPreset,
@@ -295,9 +309,17 @@ const channelMaterial = new THREE.ShaderMaterial({
   },
   vertexShader: /* glsl */ `
 varying vec2 vUv;
+#ifdef USE_INSTANCING
+attribute vec2 voxelUv;
+#endif
 void main() {
   vUv = uv;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 local = vec4(position, 1.0);
+#ifdef USE_INSTANCING
+  vUv = voxelUv;
+  local = instanceMatrix * local;
+#endif
+  gl_Position = projectionMatrix * modelViewMatrix * local;
 }
 `,
   // 输出线性值；看通道时关闭色调映射，OutputPass 只做 sRGB 编码，所以屏幕上就是贴图原值
@@ -469,7 +491,8 @@ function applyPhysical(params) {
   cubeMaterial.specularColor.setRGB(...params.uSpecularColor);
   cubeMaterial.anisotropy = params.uAnisotropy;
   cubeMaterial.anisotropyRotation = params.uAnisotropyRotation;
-  cubeMaterial.normalScale.setScalar(mapped && state.shader !== "lookdev" ? params.uNormal : 0);
+  // 体素每块是平面，法线贴图按单点取样只会让每块随机歪一下，所以体素开启时关掉
+  cubeMaterial.normalScale.setScalar(mapped && state.shader !== "lookdev" && !state.voxelOn ? params.uNormal : 0);
   cubeMaterial.map = mapped ? albedoTarget.texture : null;
   cubeMaterial.roughnessMap = mapped ? ormTarget.texture : null;
   cubeMaterial.metalnessMap = mapped ? ormTarget.texture : null;
@@ -569,6 +592,9 @@ function refreshRenderState() {
   for (const mesh of displayParts.materialMeshes) mesh.material = subjectMaterial;
   // 校色件（内芯色环、灰底盘）是参照物，任何模式下都保持写实
   for (const mesh of displayParts.neutralMeshes) mesh.material = mesh.userData.pbrMaterial;
+  for (const mesh of voxelGroup?.children || []) {
+    mesh.material = mesh.userData.voxelKind === "material" ? subjectMaterial : voxelNeutralMaterial;
+  }
   npr.setOutlinesVisible(nprOn && !debug);
   // 全局 NPR：整幅画面不走 ACES，平涂色直出；仅模型：画面仍走 ACES，NPR 材质输出 ACES 反函数抵消
   renderer.toneMapping = debug || (nprOn && global) ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
@@ -584,6 +610,94 @@ function setScope(scope) {
     button.classList.toggle("active", button.dataset.scope === state.scope);
   }
   refreshRenderState();
+}
+
+// 体素化：按「模型 + 精细度」缓存最近 8 份；开启时隐藏原网格（描边外壳是它的子节点，一起隐藏）
+const VOXEL_CACHE_LIMIT = 8;
+
+function disposeVoxelGroup(group) {
+  for (const mesh of group.children) {
+    mesh.geometry.dispose();
+    mesh.dispose();
+  }
+}
+
+function applyVoxel() {
+  if (voxelGroup) display.remove(voxelGroup);
+  voxelGroup = null;
+  const on = state.voxelOn && Boolean(displayParts.root);
+  for (const mesh of [...displayParts.materialMeshes, ...displayParts.neutralMeshes]) mesh.visible = !on;
+  if (on) {
+    const key = `${state.displayModel}:${state.voxelRes}`;
+    let built = voxelCache.get(key);
+    if (built) {
+      voxelCache.delete(key);
+    } else {
+      const started = performance.now();
+      const meshes = [
+        ...displayParts.materialMeshes.map((mesh) => ({ mesh, kind: "material" })),
+        ...displayParts.neutralMeshes.map((mesh) => ({ mesh, kind: "neutral" })),
+      ];
+      const data = voxelize(meshes, display, state.voxelRes);
+      built = new THREE.Group();
+      if (data.material.length) {
+        const mesh = buildVoxelMesh(data.material, data.size, cubeMaterial);
+        mesh.userData.voxelKind = "material";
+        built.add(mesh);
+      }
+      if (data.neutral.length) {
+        const mesh = buildVoxelMesh(data.neutral, data.size, voxelNeutralMaterial, (voxel) => calibrationColor(voxel.local));
+        mesh.userData.voxelKind = "neutral";
+        built.add(mesh);
+      }
+      for (const mesh of built.children) {
+        mesh.layers.enable(MASK_LAYER);
+        mesh.userData.display = true;
+      }
+      built.userData.count = data.material.length + data.neutral.length;
+      built.userData.ms = Math.round(performance.now() - started);
+    }
+    // Map 按插入顺序排列：重新插到末尾，超出上限时淘汰最早的
+    voxelCache.set(key, built);
+    while (voxelCache.size > VOXEL_CACHE_LIMIT) {
+      const [oldestKey, oldest] = voxelCache.entries().next().value;
+      voxelCache.delete(oldestKey);
+      disposeVoxelGroup(oldest);
+    }
+    voxelGroup = built;
+    display.add(built);
+  }
+  applyPhysical(state.params);
+  refreshRenderState();
+  syncVoxelControls();
+  updateTitle();
+  return voxelGroup?.userData;
+}
+
+function setVoxel(on, resolution = state.voxelRes) {
+  state.voxelOn = on;
+  state.voxelRes = THREE.MathUtils.clamp(Math.round(resolution), voxelResolution.min, voxelResolution.max);
+  const info = applyVoxel();
+  logEl.textContent = info
+    ? `体素化：精细度 ${state.voxelRes}，${info.count.toLocaleString()} 块（生成 ${info.ms} ms）`
+    : "关闭体素";
+}
+
+function syncVoxelControls() {
+  if (voxelToggle) voxelToggle.checked = state.voxelOn;
+  if (voxelSlider) {
+    voxelSlider.value = String(state.voxelRes);
+    voxelSlider.disabled = !state.voxelOn;
+  }
+  if (voxelValue) voxelValue.textContent = String(state.voxelRes);
+}
+
+function initVoxelControls() {
+  if (!voxelSlider) return;
+  voxelSlider.min = String(voxelResolution.min);
+  voxelSlider.max = String(voxelResolution.max);
+  voxelSlider.step = String(voxelResolution.step);
+  syncVoxelControls();
 }
 
 // 展示模型：异步加载（Shader Ball 是 GLB），用 token 丢弃过期结果
@@ -621,6 +735,7 @@ async function setDisplayModel(id) {
   }
   display.rotation.set(0, 0, 0);
   display.add(parts.root);
+  applyVoxel();
   // 程序贴图的平铺次数跟着模型走（贴图是共享的，改 repeat 对 PBR / NPR 材质同时生效）
   const repeat = def.uvRepeat || 1;
   for (const target of [albedoTarget, ormTarget, normalTarget, emissiveTarget]) target.texture.repeat.set(repeat, repeat);
@@ -752,6 +867,7 @@ function updateTitle() {
   const base = state.params.name || preset?.name || shaders[state.shader]?.name || "";
   const parts = [base];
   if (state.render === "npr") parts.push(`NPR ${nprPresets[state.nprPreset].name}`);
+  if (state.voxelOn) parts.push(`体素 ${state.voxelRes}`);
   if (state.style !== "none") parts.push(styles[state.style].name);
   nameEl.textContent = parts.join(" · ");
 }
@@ -997,6 +1113,9 @@ function applyPrompt(text) {
     applyPhysical(state.params);
     }
   if (result.displayModel && result.displayModel !== state.displayModel) setDisplayModel(result.displayModel);
+  if (result.voxel === "off") setVoxel(false);
+  else if (result.voxel === "on") setVoxel(true);
+  else if (result.voxel) setVoxel(true, voxelPresets[result.voxel]);
   if (result.render && result.render !== state.render) setRender(result.render);
   else syncSliders();
   updateTitle();
@@ -1031,6 +1150,16 @@ scopeRoot?.addEventListener("click", (event) => {
   if (!button) return;
   setScope(button.dataset.scope);
   logEl.textContent = state.scope === "global" ? "NPR 与滤镜作用于整个画面" : "NPR 与滤镜只作用于展示模型";
+});
+
+voxelToggle?.addEventListener("change", () => setVoxel(voxelToggle.checked));
+
+// 拖动时每帧最多重算一次体素
+let voxelFrame = 0;
+voxelSlider?.addEventListener("input", () => {
+  if (voxelValue) voxelValue.textContent = voxelSlider.value;
+  cancelAnimationFrame(voxelFrame);
+  voxelFrame = requestAnimationFrame(() => setVoxel(true, Number(voxelSlider.value)));
 });
 
 shapeRoot?.addEventListener("click", (event) => {
@@ -1142,6 +1271,7 @@ renderStyles();
 renderChannels();
 renderNprPresets();
 renderDisplayModels();
+initVoxelControls();
 setStyle(defaultStyle);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
