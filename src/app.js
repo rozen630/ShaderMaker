@@ -3,7 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { vertexShader, shaders, channelShaders } from "./shaders.js";
-import { presets, pbrCategories, sliderGroups } from "./presets.js";
+import { presets, pbrCategories, sliderGroups, sliderDefs } from "./presets.js";
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 import { createStylizer, styles, defaultStyle, MASK_LAYER } from "./stylize.js";
@@ -1096,7 +1096,7 @@ function renderHints() {
 function applyPrompt(text) {
   const result = interpretPrompt(text, { ...state, nprValues: npr.values });
   logEl.textContent = result.message;
-  if (!result.ok) return;
+  if (!result.ok) return result;
   const nextPreset = result.preset || result.shader;
   if (nextPreset !== state.preset || result.shader !== state.shader) {
     setPreset(nextPreset, result.params);
@@ -1119,6 +1119,7 @@ function applyPrompt(text) {
   if (result.render && result.render !== state.render) setRender(result.render);
   else syncSliders();
   updateTitle();
+  return result;
 }
 
 // 随机变体：整体旋转色相 + 换噪声种子 + 轻微扰动尺度/扭曲
@@ -1280,3 +1281,148 @@ setEnvironment(defaultEnvironment);
 setDisplayModel(defaultDisplayModel);
 syncViewport(true);
 tick();
+
+// ---- 外部控制接口：Cindy 插件的 AI 工具经由它操作页面（普通网页里不会被调用） ----
+
+const materialSliderKeys = new Set(sliderDefs.map((def) => def.key));
+const colorKeys = ["uColorA", "uColorB", "uAccent"];
+
+function round(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
+function hexToRgb(hex) {
+  const match = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!match) return null;
+  const value = parseInt(match[1], 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255].map((channel) => round(channel / 255));
+}
+
+function rgbToHex(rgb) {
+  return `#${rgb.map((channel) => Math.round(THREE.MathUtils.clamp(channel, 0, 1) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function getState() {
+  const params = {};
+  for (const group of slidersForMode()) {
+    for (const def of group.items) if (!def.npr) params[def.key] = round(state.params[def.key]);
+  }
+  return {
+    title: nameEl.textContent,
+    material: { id: state.preset, name: state.params.name || presets[state.preset]?.name || "", library: state.mode },
+    render: state.render,
+    nprPreset: state.nprPreset,
+    nprValues: state.render === "npr" ? Object.fromEntries(nprSliders.map((def) => [def.key, round(npr.values[def.key])])) : undefined,
+    style: state.style,
+    styleAmount: round(Number(styleAmountInput?.value ?? 1)),
+    scope: state.scope,
+    environment: state.environment,
+    displayModel: state.displayModel,
+    voxel: { on: state.voxelOn, resolution: state.voxelRes },
+    colors: Object.fromEntries(colorKeys.map((key) => [key, rgbToHex(state.params[key])])),
+    params,
+  };
+}
+
+function setStyleAmount(value) {
+  const amount = THREE.MathUtils.clamp(Number(value), 0, 1);
+  stylizer.setAmount(amount);
+  if (styleAmountInput) styleAmountInput.value = String(amount);
+  if (styleAmountValue) styleAmountValue.textContent = `${Math.round(amount * 100)}%`;
+}
+
+// 按页面上的操作顺序套用：材质 → 渲染模式 → 滤镜 → 环境 / 模型（异步，等加载完） → 体素 → 参数微调
+async function setLook(look = {}) {
+  const warnings = [];
+  const pick = (value, table, label) => {
+    if (value === undefined || value === null || value === "") return null;
+    if (table[value]) return value;
+    warnings.push(`未知的${label}：${value}`);
+    return null;
+  };
+  const preset = pick(look.material, presets, "材质");
+  if (preset) setPreset(preset, presets[preset]);
+  const nprPreset = pick(look.nprPreset, nprPresets, "NPR 预设");
+  if (nprPreset) setNprPreset(nprPreset, false);
+  if (look.render) {
+    if (look.render === "pbr" || look.render === "npr") setRender(look.render);
+    else warnings.push(`未知的渲染模式：${look.render}`);
+  } else if (nprPreset && state.render !== "npr") {
+    setRender("npr");
+  }
+  const style = pick(look.style, styles, "滤镜");
+  if (style) setStyle(style);
+  if (look.styleAmount !== undefined) setStyleAmount(look.styleAmount);
+  if (look.scope) {
+    if (look.scope === "subject" || look.scope === "global") setScope(look.scope);
+    else warnings.push(`未知的作用范围：${look.scope}`);
+  }
+  const environment = pick(look.environment, environments, "环境");
+  if (environment) await setEnvironment(environment);
+  const model = pick(look.displayModel, displayModels, "展示模型");
+  if (model) await setDisplayModel(model);
+  if (look.voxel !== undefined || look.voxelResolution !== undefined) {
+    setVoxel(look.voxel ?? true, look.voxelResolution ?? state.voxelRes);
+  }
+
+  let materialChanged = false;
+  for (const [key, value] of Object.entries(look.params || {})) {
+    const def = sliderDefs.find((item) => item.key === key);
+    if (!materialSliderKeys.has(key) || !Number.isFinite(Number(value))) {
+      warnings.push(`未知的材质参数：${key}`);
+      continue;
+    }
+    state.params[key] = THREE.MathUtils.clamp(Number(value), def.min, def.max);
+    materialChanged = true;
+  }
+  for (const [key, value] of Object.entries(look.colors || {})) {
+    const rgb = colorKeys.includes(key) ? hexToRgb(value) : null;
+    if (!rgb) {
+      warnings.push(`无效的颜色：${key}=${value}`);
+      continue;
+    }
+    state.params[key] = rgb;
+    materialChanged = true;
+  }
+  if (materialChanged) applyParams(state.params);
+
+  const nprValues = {};
+  for (const [key, value] of Object.entries(look.nprValues || {})) {
+    const def = nprSliders.find((item) => item.key === key);
+    if (!def || !Number.isFinite(Number(value))) {
+      warnings.push(`未知的 NPR 参数：${key}`);
+      continue;
+    }
+    nprValues[key] = THREE.MathUtils.clamp(Number(value), def.min, def.max);
+  }
+  if (Object.keys(nprValues).length) {
+    npr.setValues(nprValues);
+    applyPhysical(state.params);
+  }
+  syncSliders();
+  updateTitle();
+  logEl.textContent = `AI 调整：${nameEl.textContent}`;
+  return { state: getState(), warnings };
+}
+
+async function describeLook(text) {
+  promptInput.value = text;
+  const result = applyPrompt(text);
+  // 环境 / 模型是异步加载的，等一下再回报状态
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  return { ok: result.ok, message: result.message, state: getState() };
+}
+
+// 截图：当场渲染一帧再读画布（WebGL 画布不保留绘制缓冲，必须在同一个任务里读）
+function snapshot(maxSize = 768) {
+  const size = THREE.MathUtils.clamp(Math.round(Number(maxSize) || 768), 256, 1280);
+  stylizer.render(clock.getElapsedTime());
+  const scale = Math.min(1, size / Math.max(canvas.width, canvas.height));
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(canvas.width * scale));
+  out.height = Math.max(1, Math.round(canvas.height * scale));
+  out.getContext("2d").drawImage(canvas, 0, 0, out.width, out.height);
+  return { dataUrl: out.toDataURL("image/jpeg", 0.85), width: out.width, height: out.height, state: getState() };
+}
+
+export const shaderMaker = { getState, setLook, describeLook, snapshot };

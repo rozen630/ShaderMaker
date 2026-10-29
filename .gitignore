@@ -5,3 +5,7 @@
 .claude/
 tmp/
 vendor/
+node_modules/
+dist/
+.cache/
+*.cindy

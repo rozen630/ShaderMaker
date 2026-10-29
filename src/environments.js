@@ -1,12 +1,15 @@
-// HDR 来自 Poly Haven（CC0）。背景直接显示环境，所以用 2k，1k 放大后会糊
-const POLYHAVEN = "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k";
+// HDR 来自 Poly Haven（CC0）。背景直接显示环境，所以网页版用 2k，1k 放大后会糊。
+// Cindy 插件页面不能联网、整包又限 8 MB，打包时用 esbuild define 换成包内的 1k 文件（见 cindy-plugin/build.mjs）
+const HDR_BASE = typeof __SHADERMAKER_HDR_BASE__ === "string" ? __SHADERMAKER_HDR_BASE__ : "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr";
+const HDR_RES = typeof __SHADERMAKER_HDR_RES__ === "string" ? __SHADERMAKER_HDR_RES__ : "2k";
+const polyHaven = (name) => `${HDR_BASE}/${HDR_RES}/${name}_${HDR_RES}.hdr`;
 
 export const environments = {
   studio: {
     id: "studio",
     name: "摄影棚",
     keys: ["摄影棚", "棚拍", "studio", "indoor", "室内"],
-    hdr: `${POLYHAVEN}/royal_esplanade_2k.hdr`,
+    hdr: polyHaven("royal_esplanade"),
     background: 0x141820,
     exposure: 1.02,
     rotation: 0.55,
@@ -19,7 +22,7 @@ export const environments = {
     id: "sunset",
     name: "日落",
     keys: ["日落", "黄昏", "暖光", "sunset", "golden hour", "dusk"],
-    hdr: `${POLYHAVEN}/venice_sunset_2k.hdr`,
+    hdr: polyHaven("venice_sunset"),
     background: 0x2a1a14,
     exposure: 1.12,
     rotation: 0.15,
@@ -32,7 +35,7 @@ export const environments = {
     id: "night",
     name: "夜景",
     keys: ["夜景", "夜晚", "黑夜", "night", "moon", "dark"],
-    hdr: `${POLYHAVEN}/moonless_golf_2k.hdr`,
+    hdr: polyHaven("moonless_golf"),
     background: 0x07090f,
     exposure: 0.92,
     rotation: 1.15,
@@ -45,7 +48,7 @@ export const environments = {
     id: "plaza",
     name: "户外广场",
     keys: ["户外", "广场", "室外", "plaza", "outdoor", "daylight"],
-    hdr: `${POLYHAVEN}/spruit_sunrise_2k.hdr`,
+    hdr: polyHaven("spruit_sunrise"),
     background: 0x8ea4b8,
     exposure: 1.08,
     rotation: 0.35,

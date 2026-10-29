@@ -45,7 +45,8 @@
 - `src/stylize.js`：画面滤镜后处理管线
 - `src/voxel.js`：体素化（表面体素采样、体素 AO、实例化网格、材质体素补丁）
 - `src/models.js`：展示模型（Shader Ball / 球 / 方块）与校色件
-- `src/environments.js`：HDR 环境；`src/nl.js`：自然语言解析；`src/app.js`：场景与界面
+- `src/environments.js`：HDR 环境；`src/nl.js`：自然语言解析；`src/app.js`：场景与界面（末尾导出给 Cindy 插件用的控制接口）
+- `cindy-plugin/`：Cindy 插件（见下文）
 
 ## Surface Shader
 
@@ -71,10 +72,32 @@ NPR 不是滤镜，而是给 `MeshToonMaterial` 打补丁换掉光照：灯光�
 - 描边是沿顶点方向外扩的背面外壳；主体用模板缓冲，玻璃主体也不会透出外壳
 - 暂不支持：各向异性高光的拉伸形状、体积吸收的厚度变化
 
+## Cindy 插件
+
+ShaderMaker 可以打包成 Cindy 插件：左侧导航多一个 ShaderMaker 入口（整页打开，也可以拖进侧栏或弹成独立窗口），对话里的 AI 能直接调整页面。
+
+```bash
+npm install
+npm run build:plugin   # 生成 dist/cindy-plugin/
+```
+
+然后用 Cindy 的 `ghost_forge_pack` 打包 `dist/cindy-plugin/`（或 `ghost_forge_install` 直接安装）。
+
+- **AI 工具**（没有打开的 ShaderMaker 页面时，会自动在当前任务的右侧栏打开任务页，首次加载约 2 秒）：
+  - `set_look`：精确设置材质、PBR / NPR、NPR 预设、滤镜与强度、作用范围、环境、展示模型、体素与精细度、材质参数、三色、NPR 参数，返回完整状态。
+  - `describe_look`：一句话调整，等同于页面输入框（复用 `src/nl.js`）。
+  - `snapshot`：截取当前画面给 AI 看，方便它边调边检查。
+- **打包时的改动**（插件页面 CSP 只允许包内脚本，且不能联网）：
+  - esbuild 把 `src/` 与 three.js 打成一个 `app.js`，替代页面里的 importmap（内联脚本会被 CSP 拦截）。
+  - HDR 放进包里。整包限 8 MB，所以插件版用 1k HDR（下载缓存在 `.cache/hdr/`），网页版仍用 2k。
+  - `ghost.json` 由 `cindy-plugin/manifest.mjs` 生成，工具参数的可选项读自现有数据，新增材质 / 滤镜 / 环境不用改插件代码。
+- 同一份页面有两个入口：左侧导航的主视图（`mainView`）和跟任务走的右侧栏任务页（`taskView`）。可能同时开着好几份，后台按「当前任务的任务页 → 主视图 → 其它」选一份执行，不会重复执行。
+- 结构：`cindy-plugin/page.js`（页面入口，经 BroadcastChannel 接收请求）、`cindy-plugin/main.js`（插件后台，选页面 / 自动打开任务页 / 转发 AI 工具调用）、`src/app.js` 末尾的 `shaderMaker` 控制接口。
+
 ## 第三方资源
 
 - `assets/models/materialx-shaderball.glb`：MaterialX Viewer 的默认 Shader Ball，来自 [AcademySoftwareFoundation/MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX/tree/main/resources/Geometry)，Apache License 2.0，授权原文见 `assets/models/MATERIALX-LICENSE.txt`。内芯色环为 ShaderMaker 程序生成，不是原始资源的一部分。
-- HDR 环境：[Poly Haven](https://polyhaven.com/hdris)（CC0），运行时从 Poly Haven CDN 加载 2k 版本。
+- HDR 环境：[Poly Haven](https://polyhaven.com/hdris)（CC0），网页版运行时从 Poly Haven CDN 加载 2k 版本；Cindy 插件版把 1k 版本打进包里。
 
 ## 版本管理
 

@@ -744,23 +744,36 @@ input[type="range"]::-moz-range-thumb {
     height: auto;
   }
 
+  /* minmax(0, 1fr)：顶栏再宽也不撑开页面（Cindy 右侧栏只有 400 px 左右） */
   body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: var(--top-h) 64vh auto auto;
     grid-template-areas: "top" "viewport" "inspector" "library";
   }
 
   .topbar {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  /* 渲染模式 / NPR 预设 / 作用范围放不下时横向滚动 */
+  .render-switch {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .render-switch::-webkit-scrollbar {
+    display: none;
+  }
+
+  .render-switch > * {
+    flex: none;
   }
 
   .status {
     display: none;
   }
 
-  .render-switch {
-    justify-content: flex-end;
-  }
 
   .panel-library,
   .panel-inspector {
@@ -770,6 +783,21 @@ input[type="range"]::-moz-range-thumb {
 
   .hints,
   .nl-log {
+    display: none;
+  }
+}
+
+/* 侧栏宽度：视口工具条去掉「模型 / 通道」文字标签，按钮自动换行 */
+@media (max-width: 520px) {
+  .viewport-group > span {
+    display: none;
+  }
+
+  .viewport-group .segmented {
+    flex-wrap: wrap;
+  }
+
+  .scope-switch > span {
     display: none;
   }
 }

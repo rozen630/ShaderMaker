@@ -1,0 +1,15 @@
+{
+  "name": "shadermaker",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ShaderMaker 材质与 Shader 预览工作台",
+  "scripts": {
+    "dev": "python3 serve.py 5173",
+    "build:plugin": "node cindy-plugin/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "three": "0.170.0"
+  }
+}
