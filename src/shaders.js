@@ -67,7 +67,86 @@ float surfaceHeight(vec2 uv) {
   float t = uTime * uSpeed;
   return fbm(uv * uScale + vec2(t * 0.07, -t * 0.05) + uWarp * fbm(uv * uScale * 1.7));
 }
+
+// x = 到最近细胞中心的距离，y = 到细胞边界的近似距离 (F2 - F1)，z = 细胞随机 id
+vec3 voronoi(vec2 p, float t) {
+  vec2 n = floor(p);
+  vec2 f = fract(p);
+  float d1 = 8.0;
+  float d2 = 8.0;
+  float id = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 g = vec2(float(i), float(j));
+      vec2 o = vec2(hash(n + g), hash(n + g + 17.31));
+      o = 0.5 + 0.45 * sin(t + 6.2831 * o);
+      float d = length(g + o - f);
+      if (d < d1) {
+        d2 = d1;
+        d1 = d;
+        id = hash(n + g + 3.7);
+      } else if (d < d2) {
+        d2 = d;
+      }
+    }
+  }
+  return vec3(d1, d2 - d1, id);
+}
 `;
+
+const surfaceContract = /* glsl */ `
+struct SurfaceData {
+  vec3 baseColor;
+  vec3 emissive;
+  float ao;
+  float roughness;
+  float metalness;
+  float height;
+};
+`;
+
+function makeSurfaceShader(name, definition) {
+  const source = common + surfaceContract + definition;
+  return {
+    name,
+    kind: "surface",
+    fragment: source + /* glsl */ `
+void main() {
+  SurfaceData surface = sampleSurface(vUv);
+  gl_FragColor = vec4(grade(surface.baseColor), 1.0);
+}
+`,
+    channels: {
+      orm: source + /* glsl */ `
+void main() {
+  SurfaceData surface = sampleSurface(vUv);
+  gl_FragColor = vec4(
+    clamp(surface.ao, 0.0, 1.0),
+    clamp(surface.roughness, 0.04, 1.0),
+    clamp(surface.metalness, 0.0, 1.0),
+    1.0
+  );
+}
+`,
+      normal: source + /* glsl */ `
+void main() {
+  float texel = 1.0 / max(uResolution.x, 256.0);
+  float height = sampleSurface(vUv).height;
+  float heightX = sampleSurface(vUv + vec2(texel, 0.0)).height;
+  float heightY = sampleSurface(vUv + vec2(0.0, texel)).height;
+  vec3 normal = normalize(vec3((height - heightX) * 8.0, (height - heightY) * 8.0, 1.0));
+  gl_FragColor = vec4(normal * 0.5 + 0.5, 1.0);
+}
+`,
+      emissive: source + /* glsl */ `
+void main() {
+  SurfaceData surface = sampleSurface(vUv);
+  gl_FragColor = vec4(grade(surface.emissive), 1.0);
+}
+`,
+    },
+  };
+}
 
 export const shaders = {
   lookdev: {
@@ -144,39 +223,46 @@ void main() {
 }
 `,
   },
-  lava: {
-    name: "Molten Core",
-    fragment: common + /* glsl */ `
-void main() {
-  vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
+  lava: makeSurfaceShader("Molten Core", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 uv = inputUv - 0.5;
   float t = uTime * uSpeed;
   vec2 p = rotate(uv * uScale, t * 0.05);
   float n = fbm(p + fbm(p * 1.7 - t * 0.2) * uWarp);
-  float cracks = smoothstep(0.38, 0.82, n);
-  vec3 col = mix(uColorA, uColorB, cracks);
-  col = mix(col, uAccent, pow(cracks, 6.0));
-  col += uAccent * pow(n, 8.0) * (0.4 + uGlow);
-  gl_FragColor = vec4(grade(col), 1.0);
+  float heat = smoothstep(0.38, 0.82, n);
+  float fissures = pow(heat, 5.0);
+  SurfaceData surface;
+  surface.baseColor = mix(uColorA, uColorB, heat);
+  surface.baseColor = mix(surface.baseColor, uAccent, fissures * 0.72);
+  surface.emissive = uAccent * fissures * (0.35 + uGlow * 0.75);
+  surface.ao = mix(0.68, 1.0, heat);
+  surface.roughness = mix(1.0, 0.58, heat);
+  surface.metalness = mix(0.04, 0.1, heat);
+  surface.height = n * 0.72 - fissures * 0.28;
+  return surface;
 }
-`,
-  },
-  ocean: {
-    name: "Deep Current",
-    fragment: common + /* glsl */ `
-void main() {
-  vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
+`),
+  ocean: makeSurfaceShader("Deep Current", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 uv = inputUv - 0.5;
   float t = uTime * uSpeed;
   vec2 p = uv * uScale;
   p.x += sin(p.y * 3.0 + t) * 0.12 * uWarp;
   float waves = sin(p.y * 8.0 + t * 1.6 + fbm(p) * 4.0);
   float n = 0.5 + 0.5 * waves;
-  vec3 col = mix(uColorA, uColorB, n);
-  col += uAccent * smoothstep(0.72, 1.0, n) * uGlow;
-  col *= 0.75 + 0.25 * (1.0 - length(uv));
-  gl_FragColor = vec4(grade(col), 1.0);
+  float crest = smoothstep(0.72, 1.0, n);
+  SurfaceData surface;
+  surface.baseColor = mix(uColorA, uColorB, n);
+  surface.baseColor += uAccent * crest * 0.28;
+  surface.baseColor *= 0.75 + 0.25 * (1.0 - length(uv));
+  surface.emissive = uAccent * crest * uGlow * 0.08;
+  surface.ao = mix(0.88, 1.0, n);
+  surface.roughness = mix(1.0, 0.62, crest);
+  surface.metalness = 0.0;
+  surface.height = n;
+  return surface;
 }
-`,
-  },
+`),
   plasma: {
     name: "Plasma Field",
     fragment: common + /* glsl */ `
@@ -215,22 +301,25 @@ void main() {
 }
 `,
   },
-  marble: {
-    name: "Liquid Marble",
-    fragment: common + /* glsl */ `
-void main() {
-  vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
+  marble: makeSurfaceShader("Liquid Marble", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 uv = inputUv - 0.5;
   float t = uTime * uSpeed * 0.35;
   vec2 p = rotate(uv * uScale, 0.4) + vec2(t * 0.05, -t * 0.03);
   float n = fbm(p + uWarp * fbm(p * 2.0 + t));
   float veins = smoothstep(0.42, 0.58, abs(sin(n * 12.0)));
-  vec3 col = mix(uColorA, uColorB, n);
-  col = mix(col, uAccent, 1.0 - veins);
-  col += uAccent * (1.0 - veins) * 0.2 * uGlow;
-  gl_FragColor = vec4(grade(col), 1.0);
+  float veinMask = 1.0 - veins;
+  SurfaceData surface;
+  surface.baseColor = mix(uColorA, uColorB, n);
+  surface.baseColor = mix(surface.baseColor, uAccent, veinMask);
+  surface.emissive = vec3(0.0);
+  surface.ao = mix(0.86, 1.0, veins);
+  surface.roughness = mix(0.68, 1.0, veins);
+  surface.metalness = 0.0;
+  surface.height = n * 0.35 + veinMask * 0.16;
+  return surface;
 }
-`,
-  },
+`),
   fire: {
     name: "Ember Rise",
     fragment: common + /* glsl */ `
@@ -264,6 +353,285 @@ void main() {
   col += uAccent * smoothstep(0.75, 0.95, grid) * (0.4 + uGlow);
   col += uAccent * scan * 0.08 * uWarp;
   col *= 0.8 + 0.2 * (1.0 - length(uv));
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`,
+  },
+  wood: makeSurfaceShader("Oak Planks", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 p = inputUv * uScale;
+  float row = floor(p.y * 2.0);
+  vec2 local = vec2(p.x + hash(vec2(row, 3.0)) * 7.0, fract(p.y * 2.0));
+  float seam = smoothstep(0.0, 0.035, local.y) * smoothstep(1.0, 0.965, local.y);
+  vec2 q = vec2(local.x * 0.7, local.y * 0.5 + row * 3.1);
+  float bend = fbm(q * vec2(1.3, 2.4) + uTime * uSpeed * 0.05) * (0.6 + uWarp);
+  float rings = fract((q.y + bend) * 6.0);
+  float late = smoothstep(0.55, 0.95, rings);
+  float fiber = noise(vec2(local.x * 3.0, local.y * 90.0 + row * 17.0));
+  float grain = late * 0.75 + fiber * 0.25;
+  SurfaceData surface;
+  surface.baseColor = mix(uColorB, uColorA, grain);
+  surface.baseColor = mix(surface.baseColor, uAccent, smoothstep(0.7, 1.0, fbm(q * 3.0)) * 0.25);
+  surface.baseColor *= mix(0.35, 1.0, seam);
+  surface.emissive = vec3(0.0);
+  surface.ao = mix(0.45, 1.0, seam);
+  surface.roughness = mix(0.55, 0.85, grain);
+  surface.metalness = 0.0;
+  surface.height = seam * 0.6 + (1.0 - late) * 0.12 + fiber * 0.06;
+  return surface;
+}
+`),
+  rust: makeSurfaceShader("Corroded Iron", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 p = inputUv * uScale * 2.0;
+  float t = uTime * uSpeed * 0.05;
+  float n = fbm(p + uWarp * fbm(p * 1.9 + t));
+  float rust = smoothstep(0.42, 0.62, n);
+  float pits = smoothstep(0.6, 0.8, fbm(p * 6.0 + 4.0));
+  float streak = fbm(vec2(p.x * 6.0, p.y * 0.6));
+  vec3 metal = mix(uAccent * 0.7, uAccent, streak);
+  vec3 oxide = mix(uColorA, uColorB, fbm(p * 4.0));
+  SurfaceData surface;
+  surface.baseColor = mix(metal, oxide, rust);
+  surface.emissive = vec3(0.0);
+  surface.ao = 1.0 - pits * 0.45 * rust;
+  surface.roughness = mix(0.26 + streak * 0.14, 0.94, rust);
+  surface.metalness = mix(1.0, 0.04, rust);
+  surface.height = rust * 0.25 - pits * 0.2 * rust + fbm(p * 8.0) * 0.08 * rust;
+  return surface;
+}
+`),
+  scifi: makeSurfaceShader("Sci-Fi Panel", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 p = inputUv * uScale * 2.0;
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float r = hash(cell);
+  if (r > 0.55) {
+    cell = cell * 2.0 + floor(f * 2.0);
+    f = fract(f * 2.0);
+    r = hash(cell + 7.0);
+  }
+  float edge = min(min(f.x, f.y), min(1.0 - f.x, 1.0 - f.y));
+  float groove = smoothstep(0.015, 0.045, edge);
+  float bevel = smoothstep(0.045, 0.1, edge);
+  float pulse = 0.5 + 0.5 * sin(uTime * uSpeed * 2.0 + r * 30.0);
+  vec2 c = f - 0.5;
+  float bolt = smoothstep(0.035, 0.02, length(abs(c) - 0.4));
+  float seamLight = (1.0 - smoothstep(0.0, 0.02, edge)) * step(0.7, r);
+  float stripe = step(0.86, r) * step(abs(c.y), 0.05) * step(abs(c.x), 0.34);
+  float glowMask = max(seamLight, stripe) * (0.55 + 0.45 * pulse);
+  vec3 panel = mix(uColorA, uColorB, 0.35 + 0.4 * r);
+  panel *= 0.85 + 0.15 * fbm(p * 5.0);
+  SurfaceData surface;
+  surface.baseColor = mix(panel * 0.3, panel, groove);
+  surface.baseColor = mix(surface.baseColor, uColorB * 1.2, bolt);
+  surface.baseColor = mix(surface.baseColor, uAccent, glowMask);
+  surface.emissive = uAccent * glowMask * (0.5 + uGlow);
+  surface.ao = mix(0.35, 1.0, groove);
+  surface.roughness = mix(0.6, 0.3 + 0.25 * fbm(p * 9.0), groove);
+  surface.metalness = mix(0.4, 0.92, step(0.3, r)) * (1.0 - glowMask);
+  surface.height = groove * 0.4 + bevel * 0.2 + bolt * 0.15 - stripe * 0.1;
+  return surface;
+}
+`),
+  carbon: makeSurfaceShader("Carbon Weave", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 p = inputUv * uScale * 12.0;
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float checker = mod(cell.x + cell.y, 2.0);
+  float across = checker < 0.5 ? f.y : f.x;
+  float tow = sin(across * 3.14159);
+  float fibers = 0.5 + 0.5 * sin(across * 3.14159 * 14.0 + noise(p * 3.0) * uWarp);
+  float shade = tow * (0.75 + 0.25 * fibers);
+  SurfaceData surface;
+  surface.baseColor = mix(uColorA, uColorB, shade * (0.55 + 0.45 * checker));
+  surface.baseColor = mix(surface.baseColor, uAccent, pow(shade, 6.0) * 0.25);
+  surface.emissive = vec3(0.0);
+  surface.ao = mix(0.55, 1.0, tow);
+  surface.roughness = mix(0.55, 0.3, tow);
+  surface.metalness = 0.0;
+  surface.height = tow * 0.5 + fibers * 0.04;
+  return surface;
+}
+`),
+  rock: makeSurfaceShader("Weathered Rock", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 p = inputUv * uScale * 3.0;
+  p += uWarp * 0.35 * vec2(fbm(p * 0.8), fbm(p * 0.8 + 5.2));
+  vec3 v = voronoi(p, 0.0);
+  float crack = 1.0 - smoothstep(0.0, 0.08, v.y);
+  float detail = fbm(p * 4.0);
+  float strata = fbm(p * vec2(0.6, 3.0));
+  vec3 stone = mix(uColorA, uColorB, 0.35 + 0.5 * v.z);
+  stone = mix(stone, uAccent, smoothstep(0.55, 0.8, strata) * 0.35);
+  stone *= 0.8 + 0.35 * detail;
+  SurfaceData surface;
+  surface.baseColor = mix(stone, stone * 0.25, crack);
+  surface.emissive = uAccent * crack * max(uGlow - 1.0, 0.0);
+  surface.ao = mix(1.0, 0.3, crack) * (0.85 + 0.15 * detail);
+  surface.roughness = 0.72 + 0.28 * detail;
+  surface.metalness = 0.0;
+  surface.height = (1.0 - crack) * 0.5 + detail * 0.2 - v.x * 0.15;
+  return surface;
+}
+`),
+  hammered: makeSurfaceShader("Hammered Metal", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 p = inputUv * uScale * 6.0;
+  p += uWarp * 0.2 * vec2(noise(p * 0.7), noise(p * 0.7 + 3.1));
+  vec3 v = voronoi(p, 0.0);
+  float rim = 1.0 - smoothstep(0.0, 0.06, v.y);
+  float smudge = fbm(p * 0.6);
+  SurfaceData surface;
+  surface.baseColor = mix(uColorB, uAccent, v.z * 0.35 + smudge * 0.2);
+  surface.baseColor = mix(surface.baseColor, uColorA, smoothstep(0.55, 0.9, smudge) * 0.5);
+  surface.emissive = vec3(0.0);
+  surface.ao = 1.0 - rim * 0.2;
+  surface.roughness = 0.16 + 0.2 * smudge + rim * 0.15;
+  surface.metalness = 1.0;
+  surface.height = v.x * v.x * 0.9;
+  return surface;
+}
+`),
+  tiles: makeSurfaceShader("Glazed Tiles", /* glsl */ `
+SurfaceData sampleSurface(vec2 inputUv) {
+  vec2 p = inputUv * uScale * 3.0;
+  p.x += step(1.0, mod(floor(p.y), 2.0)) * 0.5 * uWarp;
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float edge = min(min(f.x, f.y), min(1.0 - f.x, 1.0 - f.y));
+  float grout = 1.0 - smoothstep(0.03, 0.05, edge);
+  float bevel = smoothstep(0.05, 0.12, edge);
+  float r = hash(cell);
+  vec3 tile = mix(uColorB, uAccent, step(0.78, r) * 0.65 + r * 0.12);
+  tile *= 0.92 + 0.08 * fbm(p * 6.0);
+  SurfaceData surface;
+  surface.baseColor = mix(tile, uColorA, grout);
+  surface.emissive = vec3(0.0);
+  surface.ao = mix(0.5, 1.0, bevel);
+  surface.roughness = mix(0.92, 0.1 + 0.1 * fbm(p * 10.0), 1.0 - grout);
+  surface.metalness = 0.0;
+  surface.height = (1.0 - grout) * 0.4 + bevel * 0.2 + fbm(p * 14.0) * 0.02;
+  return surface;
+}
+`),
+  caustics: {
+    name: "Caustics",
+    fragment: common + /* glsl */ `
+void main() {
+  float t = uTime * uSpeed + 23.0;
+  vec2 p = mod(vUv * uScale * 6.2831, 6.2831) - 250.0;
+  vec2 i = p;
+  float c = 1.0;
+  float inten = 0.005 * (0.6 + uWarp * 0.4);
+  for (int n = 0; n < 5; n++) {
+    float tt = t * (1.0 - (3.5 / float(n + 1)));
+    i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
+    c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / inten), p.y / (cos(i.y + tt) / inten)));
+  }
+  c /= 5.0;
+  c = 1.17 - pow(c, 1.4);
+  float light = clamp(pow(abs(c), 8.0), 0.0, 1.6);
+  vec3 col = mix(uColorA, uColorB, 0.35 + 0.65 * vUv.y);
+  col += uAccent * light * (0.55 + uGlow * 0.6);
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`,
+  },
+  hologram: {
+    name: "Hologram",
+    fragment: common + /* glsl */ `
+void main() {
+  vec2 uv = vUv;
+  float t = uTime * uSpeed;
+  float block = floor(uv.y * 18.0);
+  float glitch = step(0.94, hash(vec2(block, floor(t * 7.0))));
+  uv.x += glitch * (hash(vec2(block, 9.0)) - 0.5) * 0.08 * uWarp;
+  vec2 p = uv * uScale * 8.0;
+  vec2 r = vec2(1.0, 1.7320508);
+  vec2 a = mod(p, r) - r * 0.5;
+  vec2 b = mod(p - r * 0.5, r) - r * 0.5;
+  vec2 g = dot(a, a) < dot(b, b) ? a : b;
+  vec2 ag = abs(g);
+  float hexDist = max(dot(ag, vec2(0.5, 0.8660254)), ag.x);
+  float line = smoothstep(0.07, 0.0, 0.5 - hexDist);
+  float scan = 0.5 + 0.5 * sin(uv.y * 260.0 - t * 8.0);
+  float sweep = exp(-pow((fract(uv.y - t * 0.2) - 0.5) * 10.0, 2.0));
+  float flicker = 0.88 + 0.12 * sin(t * 37.0) * sin(t * 13.0);
+  float n = fbm(p * 0.25 + t * 0.2);
+  vec3 col = uColorA + uColorB * n * 0.6;
+  col += uAccent * line * (0.45 + uGlow * 0.55);
+  col += uAccent * sweep * 0.55 * uGlow;
+  col *= (0.72 + 0.28 * scan) * flicker;
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`,
+  },
+  vortex: {
+    name: "Portal Vortex",
+    fragment: common + /* glsl */ `
+void main() {
+  vec2 uv = vUv - 0.5;
+  float t = uTime * uSpeed;
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float swirl = a + uWarp * 2.2 / (r + 0.15) - t * 1.2;
+  vec2 ring = vec2(cos(swirl), sin(swirl));
+  float n = fbm(ring * 1.6 + vec2(r * uScale * 3.0 - t * 0.6, 0.0));
+  float arms = 0.5 + 0.5 * sin(swirl * 3.0 + n * 4.0);
+  float energy = arms * n;
+  vec3 col = mix(uColorA, uColorB, smoothstep(0.1, 0.6, energy));
+  col = mix(col, uAccent, pow(clamp(energy * 1.6, 0.0, 1.0), 3.0));
+  col *= smoothstep(0.52, 0.12, r);
+  col += uAccent * exp(-r * 9.0) * uGlow;
+  col += uColorB * smoothstep(0.03, 0.0, abs(r - 0.42)) * 0.6 * uGlow;
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`,
+  },
+  rain: {
+    name: "Digital Rain",
+    fragment: common + /* glsl */ `
+void main() {
+  vec2 uv = vUv;
+  float t = uTime * uSpeed;
+  float cols = floor(22.0 * uScale);
+  vec2 grid = vec2(uv.x * cols, uv.y * cols * 1.4);
+  vec2 cell = floor(grid);
+  vec2 f = fract(grid);
+  float colSeed = hash(vec2(cell.x, 0.0));
+  float speed = 0.6 + colSeed * 1.4;
+  float headY = 1.0 - fract(t * speed * 0.2 + colSeed * 7.0);
+  float y = (cell.y + 0.5) / (cols * 1.4);
+  float dist = y - headY;
+  float trail = step(0.0, dist) * exp(-dist * (7.0 - uWarp * 2.0));
+  float glyphTime = floor(t * 6.0 * (0.3 + hash(cell)));
+  vec2 gp = floor(f * vec2(3.0, 5.0));
+  float bit = step(0.45, hash(cell * 1.7 + gp * 13.1 + glyphTime));
+  float inside = step(0.15, f.x) * step(f.x, 0.85) * step(0.1, f.y) * step(f.y, 0.9);
+  float glyph = bit * inside;
+  float head = smoothstep(1.2 / (cols * 1.4), 0.0, abs(dist));
+  vec3 col = uColorA;
+  col += uColorB * glyph * trail;
+  col += uAccent * glyph * head * (1.0 + uGlow);
+  gl_FragColor = vec4(grade(col), 1.0);
+}
+`,
+  },
+  cells: {
+    name: "Living Cells",
+    fragment: common + /* glsl */ `
+void main() {
+  vec2 p = vUv * uScale * 4.0;
+  p += uWarp * 0.3 * vec2(fbm(p + uTime * uSpeed * 0.2), fbm(p - 3.7));
+  vec3 v = voronoi(p, uTime * uSpeed);
+  float membrane = 1.0 - smoothstep(0.0, 0.08 + uGlow * 0.04, v.y);
+  float nucleus = smoothstep(0.2, 0.06, v.x);
+  vec3 col = mix(uColorA, uColorB, v.z * 0.7 + v.x * 0.3);
+  col += uAccent * membrane * (0.45 + uGlow * 0.5);
+  col += mix(uColorB, uAccent, v.z) * nucleus * 0.5;
   gl_FragColor = vec4(grade(col), 1.0);
 }
 `,
@@ -319,523 +687,9 @@ void main() {
   gl_FragColor = vec4(0.5, 0.5, 1.0, 1.0);
 }
 `,
-};
-
-const pbrBase = {
-  family: "pbr",
-  category: "utility",
-  shader: "lookdev",
-  shape: "cube",
-  useMaps: true,
-  uColorA: [0.08, 0.08, 0.09],
-  uColorB: [0.5, 0.5, 0.52],
-  uAccent: [0.9, 0.9, 0.92],
-  uSheenColor: [1, 1, 1],
-  uSpecularColor: [1, 1, 1],
-  uAttenuationColor: [1, 1, 1],
-  uSpeed: 0,
-  uScale: 1,
-  uIntensity: 1,
-  uContrast: 1,
-  uWarp: 0,
-  uGlow: 0,
-  uSeed: 1,
-  uMetalness: 0,
-  uRoughness: 0.36,
-  uEnv: 1.15,
-  uEmissive: 0,
-  uClearcoat: 0,
-  uClearcoatRoughness: 0.22,
-  uSheen: 0,
-  uSheenRoughness: 0.45,
-  uTransmission: 0,
-  uIor: 1.5,
-  uThickness: 0.5,
-  uAttenuationDistance: 10,
-  uDispersion: 0,
-  uIridescence: 0,
-  uIridescenceIor: 1.3,
-  uIridescenceThickness: 400,
-  uSpecularIntensity: 1,
-  uAnisotropy: 0,
-  uAnisotropyRotation: 0,
-  uNormal: 0,
-};
-
-function pbrPreset(name, category, values = {}) {
-  return { ...pbrBase, name, category, shape: "sphere", useMaps: false, ...values };
+  emissiveFlat: common + /* glsl */ `
+void main() {
+  gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
 }
-
-export const pbrCategories = [
-  { id: "utility", label: "校准" },
-  { id: "metal", label: "金属" },
-  { id: "dielectric", label: "介质" },
-  { id: "coated", label: "涂层" },
-  { id: "fabric", label: "织物" },
-  { id: "volume", label: "透明体" },
-  { id: "optical", label: "光学" },
-];
-
-export const presets = {
-  lookdev: pbrPreset("Lookdev", "utility", {
-    shape: "cube",
-    useMaps: true,
-    uColorA: [0.18, 0.18, 0.18],
-    uColorB: [0.58, 0.58, 0.58],
-    uAccent: [0.86, 0.86, 0.88],
-    uSpeed: 0.12,
-    uScale: 1,
-    uIntensity: 1,
-    uContrast: 1,
-    uWarp: 0,
-    uGlow: 0,
-    uSeed: 1,
-    uMetalness: 1,
-    uRoughness: 1,
-    uEnv: 1.15,
-    uEmissive: 0,
-  }),
-  gray: pbrPreset("灰球", "utility", {
-    uColorA: [0.08, 0.08, 0.08],
-    uColorB: [0.18, 0.18, 0.18],
-    uAccent: [0.32, 0.32, 0.32],
-    uRoughness: 0.36,
-    uEnv: 1,
-  }),
-  chrome: pbrPreset("铬", "metal", {
-    uColorA: [0.18, 0.18, 0.19],
-    uColorB: [0.91, 0.91, 0.92],
-    uAccent: [0.96, 0.96, 0.97],
-    uMetalness: 1,
-    uRoughness: 0.05,
-    uEnv: 1.2,
-  }),
-  aluminum: pbrPreset("铝", "metal", {
-    uColorA: [0.22, 0.23, 0.24],
-    uColorB: [0.91, 0.92, 0.92],
-    uAccent: [0.98, 0.98, 0.99],
-    uMetalness: 1,
-    uRoughness: 0.24,
-  }),
-  steel: pbrPreset("钢", "metal", {
-    uColorA: [0.12, 0.13, 0.14],
-    uColorB: [0.56, 0.57, 0.58],
-    uAccent: [0.84, 0.86, 0.88],
-    uMetalness: 1,
-    uRoughness: 0.3,
-  }),
-  brushedSteel: pbrPreset("拉丝钢", "metal", {
-    uColorA: [0.1, 0.11, 0.12],
-    uColorB: [0.58, 0.6, 0.62],
-    uAccent: [0.88, 0.9, 0.92],
-    uMetalness: 1,
-    uRoughness: 0.32,
-    uAnisotropy: 0.92,
-    uAnisotropyRotation: 0.35,
-  }),
-  copper: pbrPreset("铜", "metal", {
-    uColorA: [0.3, 0.08, 0.035],
-    uColorB: [0.955, 0.638, 0.538],
-    uAccent: [1, 0.82, 0.7],
-    uMetalness: 1,
-    uRoughness: 0.2,
-  }),
-  gold: pbrPreset("金", "metal", {
-    uColorA: [0.35, 0.16, 0.02],
-    uColorB: [1.0, 0.549, 0.09],
-    uAccent: [1.0, 0.78, 0.32],
-    uMetalness: 1,
-    uRoughness: 0.18,
-    uEnv: 1.15,
-  }),
-  titanium: pbrPreset("钛", "metal", {
-    uColorA: [0.15, 0.13, 0.12],
-    uColorB: [0.54, 0.5, 0.45],
-    uAccent: [0.86, 0.82, 0.76],
-    uMetalness: 1,
-    uRoughness: 0.26,
-  }),
-  mattePlastic: pbrPreset("哑光塑料", "dielectric", {
-    uColorA: [0.015, 0.04, 0.06],
-    uColorB: [0.03, 0.32, 0.52],
-    uAccent: [0.32, 0.72, 0.92],
-    uRoughness: 0.62,
-    uIor: 1.46,
-    uSpecularIntensity: 0.72,
-  }),
-  glossyPlastic: pbrPreset("亮面塑料", "dielectric", {
-    uColorA: [0.12, 0.005, 0.012],
-    uColorB: [0.72, 0.025, 0.06],
-    uAccent: [1, 0.36, 0.32],
-    uRoughness: 0.16,
-    uIor: 1.46,
-  }),
-  rubber: pbrPreset("橡胶", "dielectric", {
-    uColorA: [0.008, 0.009, 0.01],
-    uColorB: [0.025, 0.028, 0.032],
-    uAccent: [0.14, 0.15, 0.16],
-    uRoughness: 0.82,
-    uIor: 1.52,
-    uSpecularIntensity: 0.5,
-  }),
-  ceramic: pbrPreset("陶瓷", "dielectric", {
-    uColorA: [0.42, 0.44, 0.45],
-    uColorB: [0.92, 0.93, 0.91],
-    uAccent: [1, 0.98, 0.94],
-    uRoughness: 0.14,
-    uIor: 1.5,
-    uClearcoat: 0.18,
-    uClearcoatRoughness: 0.08,
-  }),
-  carPaint: pbrPreset("车漆", "coated", {
-    uColorA: [0.01, 0.025, 0.08],
-    uColorB: [0.025, 0.13, 0.62],
-    uAccent: [0.25, 0.62, 1],
-    uMetalness: 0.55,
-    uRoughness: 0.28,
-    uClearcoat: 1,
-    uClearcoatRoughness: 0.045,
-  }),
-  lacquer: pbrPreset("烤漆", "coated", {
-    uColorA: [0.09, 0.012, 0.006],
-    uColorB: [0.58, 0.055, 0.018],
-    uAccent: [1, 0.42, 0.18],
-    uRoughness: 0.3,
-    uClearcoat: 0.9,
-    uClearcoatRoughness: 0.08,
-  }),
-  pearl: pbrPreset("珍珠", "coated", {
-    uColorA: [0.42, 0.44, 0.48],
-    uColorB: [0.88, 0.86, 0.82],
-    uAccent: [0.95, 0.8, 0.92],
-    uRoughness: 0.24,
-    uClearcoat: 0.35,
-    uClearcoatRoughness: 0.1,
-    uIridescence: 0.65,
-    uIridescenceIor: 1.3,
-    uIridescenceThickness: 320,
-  }),
-  velvet: pbrPreset("丝绒", "fabric", {
-    uColorA: [0.035, 0.005, 0.05],
-    uColorB: [0.28, 0.015, 0.42],
-    uAccent: [0.82, 0.28, 1],
-    uSheenColor: [0.82, 0.28, 1],
-    uRoughness: 0.78,
-    uSheen: 1,
-    uSheenRoughness: 0.68,
-  }),
-  satin: pbrPreset("缎面", "fabric", {
-    uColorA: [0.18, 0.12, 0.025],
-    uColorB: [0.82, 0.55, 0.12],
-    uAccent: [1, 0.9, 0.48],
-    uSheenColor: [1, 0.82, 0.35],
-    uRoughness: 0.42,
-    uSheen: 0.85,
-    uSheenRoughness: 0.34,
-    uAnisotropy: 0.55,
-    uAnisotropyRotation: 1.1,
-  }),
-  leather: pbrPreset("皮革", "fabric", {
-    uColorA: [0.05, 0.012, 0.006],
-    uColorB: [0.28, 0.07, 0.025],
-    uAccent: [0.72, 0.3, 0.12],
-    uSheenColor: [0.72, 0.3, 0.12],
-    uRoughness: 0.58,
-    uSheen: 0.28,
-    uSheenRoughness: 0.72,
-  }),
-  glass: pbrPreset("玻璃", "volume", {
-    uColorA: [0.75, 0.86, 0.9],
-    uColorB: [0.92, 0.97, 1.0],
-    uAccent: [0.75, 0.9, 0.95],
-    uRoughness: 0.04,
-    uEnv: 1,
-    uTransmission: 1,
-    uIor: 1.5,
-    uThickness: 0.55,
-    uClearcoat: 1,
-    uClearcoatRoughness: 0.02,
-  }),
-  frostedGlass: pbrPreset("磨砂玻璃", "volume", {
-    uColorA: [0.5, 0.65, 0.7],
-    uColorB: [0.8, 0.9, 0.92],
-    uAccent: [0.88, 0.98, 1],
-    uRoughness: 0.36,
-    uTransmission: 0.95,
-    uIor: 1.5,
-    uThickness: 0.7,
-  }),
-  amberGlass: pbrPreset("琥珀玻璃", "volume", {
-    uColorA: [0.24, 0.035, 0.002],
-    uColorB: [0.92, 0.3, 0.015],
-    uAccent: [1, 0.72, 0.18],
-    uAttenuationColor: [1, 0.26, 0.025],
-    uRoughness: 0.08,
-    uTransmission: 1,
-    uIor: 1.5,
-    uThickness: 0.8,
-    uAttenuationDistance: 0.85,
-  }),
-  water: pbrPreset("水", "volume", {
-    uColorA: [0.02, 0.18, 0.24],
-    uColorB: [0.76, 0.94, 0.98],
-    uAccent: [0.62, 1, 0.96],
-    uAttenuationColor: [0.35, 0.92, 0.96],
-    uRoughness: 0.02,
-    uTransmission: 1,
-    uIor: 1.333,
-    uThickness: 0.85,
-    uAttenuationDistance: 3.5,
-  }),
-  acrylic: pbrPreset("亚克力", "volume", {
-    uColorA: [0.08, 0.01, 0.025],
-    uColorB: [0.82, 0.035, 0.14],
-    uAccent: [1, 0.38, 0.48],
-    uAttenuationColor: [1, 0.12, 0.22],
-    uRoughness: 0.09,
-    uTransmission: 0.88,
-    uIor: 1.49,
-    uThickness: 0.65,
-    uAttenuationDistance: 1.4,
-  }),
-  diamond: pbrPreset("钻石", "optical", {
-    uColorA: [0.7, 0.82, 0.9],
-    uColorB: [0.96, 0.99, 1],
-    uAccent: [0.82, 0.92, 1],
-    uRoughness: 0,
-    uTransmission: 1,
-    uIor: 2.33,
-    uThickness: 0.75,
-    uDispersion: 1,
-    uSpecularIntensity: 1,
-  }),
-  soapFilm: pbrPreset("薄膜虹彩", "optical", {
-    uColorA: [0.03, 0.04, 0.08],
-    uColorB: [0.18, 0.3, 0.52],
-    uAccent: [0.92, 0.28, 0.76],
-    uRoughness: 0.08,
-    uTransmission: 0.72,
-    uIor: 1.34,
-    uThickness: 0.2,
-    uIridescence: 1,
-    uIridescenceIor: 1.3,
-    uIridescenceThickness: 460,
-  }),
-  aurora: {
-    ...pbrBase,
-    family: "shader",
-    shader: "aurora",
-    name: "极光",
-    uColorA: [0.02, 0.05, 0.12],
-    uColorB: [0.05, 0.35, 0.38],
-    uAccent: [0.45, 0.95, 0.78],
-    uSpeed: 0.55,
-    uScale: 2.2,
-    uIntensity: 1.05,
-    uContrast: 1.15,
-    uWarp: 1.15,
-    uGlow: 0.85,
-    uSeed: 11,
-    uMetalness: 0.08,
-    uRoughness: 0.42,
-    uEnv: 1.05,
-    uEmissive: 0.18,
-    uNormal: 0.28,
-  },
-  lava: {
-    ...pbrBase,
-    family: "shader",
-    shader: "lava",
-    name: "岩浆",
-    uColorA: [0.08, 0.01, 0.01],
-    uColorB: [0.72, 0.16, 0.03],
-    uAccent: [1.0, 0.78, 0.18],
-    uSpeed: 0.42,
-    uScale: 2.6,
-    uIntensity: 1.2,
-    uContrast: 1.25,
-    uWarp: 1.4,
-    uGlow: 1.1,
-    uSeed: 3,
-    uMetalness: 0.22,
-    uRoughness: 0.52,
-    uEnv: 0.9,
-    uEmissive: 0.42,
-    uNormal: 0.45,
-  },
-  ocean: {
-    ...pbrBase,
-    family: "shader",
-    shader: "ocean",
-    name: "海洋",
-    uColorA: [0.01, 0.05, 0.12],
-    uColorB: [0.02, 0.28, 0.42],
-    uAccent: [0.45, 0.95, 0.92],
-    uSpeed: 0.7,
-    uScale: 1.8,
-    uIntensity: 1.0,
-    uContrast: 1.1,
-    uWarp: 1.0,
-    uGlow: 0.7,
-    uSeed: 21,
-    uMetalness: 0.38,
-    uRoughness: 0.22,
-    uEnv: 1.2,
-    uEmissive: 0.08,
-    uClearcoat: 0.35,
-    uClearcoatRoughness: 0.12,
-    uNormal: 0.4,
-  },
-  plasma: {
-    ...pbrBase,
-    family: "shader",
-    shader: "plasma",
-    name: "等离子",
-    uColorA: [0.12, 0.0, 0.22],
-    uColorB: [0.08, 0.18, 0.55],
-    uAccent: [0.95, 0.35, 0.85],
-    uSpeed: 0.85,
-    uScale: 2.4,
-    uIntensity: 1.15,
-    uContrast: 1.2,
-    uWarp: 1.3,
-    uGlow: 0.95,
-    uSeed: 7,
-    uMetalness: 0.58,
-    uRoughness: 0.2,
-    uEnv: 1.25,
-    uEmissive: 0.28,
-    uAnisotropy: 0.35,
-    uNormal: 0.22,
-  },
-  stars: {
-    ...pbrBase,
-    family: "shader",
-    shader: "stars",
-    name: "星空",
-    uColorA: [0.01, 0.02, 0.06],
-    uColorB: [0.05, 0.04, 0.14],
-    uAccent: [0.85, 0.92, 1.0],
-    uSpeed: 0.35,
-    uScale: 1.1,
-    uIntensity: 1.05,
-    uContrast: 1.05,
-    uWarp: 0.85,
-    uGlow: 1.2,
-    uSeed: 42,
-    uMetalness: 0.04,
-    uRoughness: 0.62,
-    uEnv: 0.85,
-    uEmissive: 0.22,
-    uNormal: 0.08,
-  },
-  marble: {
-    ...pbrBase,
-    family: "shader",
-    shader: "marble",
-    name: "大理石",
-    uColorA: [0.78, 0.74, 0.68],
-    uColorB: [0.18, 0.2, 0.24],
-    uAccent: [0.95, 0.9, 0.82],
-    uSpeed: 0.22,
-    uScale: 2.0,
-    uIntensity: 0.95,
-    uContrast: 1.08,
-    uWarp: 1.05,
-    uGlow: 0.35,
-    uSeed: 18,
-    uMetalness: 0.02,
-    uRoughness: 0.16,
-    uEnv: 1.35,
-    uEmissive: 0,
-    uClearcoat: 0.55,
-    uClearcoatRoughness: 0.08,
-    uNormal: 0.32,
-  },
-  fire: {
-    ...pbrBase,
-    family: "shader",
-    shader: "fire",
-    name: "火焰",
-    uColorA: [0.05, 0.01, 0.02],
-    uColorB: [0.85, 0.22, 0.04],
-    uAccent: [1.0, 0.86, 0.32],
-    uSpeed: 0.9,
-    uScale: 2.3,
-    uIntensity: 1.18,
-    uContrast: 1.22,
-    uWarp: 1.15,
-    uGlow: 1.05,
-    uSeed: 5,
-    uMetalness: 0.12,
-    uRoughness: 0.48,
-    uEnv: 0.95,
-    uEmissive: 0.48,
-    uNormal: 0.38,
-  },
-  neon: {
-    ...pbrBase,
-    family: "shader",
-    shader: "neon",
-    name: "霓虹",
-    uColorA: [0.03, 0.01, 0.08],
-    uColorB: [0.12, 0.02, 0.22],
-    uAccent: [0.2, 0.95, 0.85],
-    uSpeed: 0.65,
-    uScale: 1.6,
-    uIntensity: 1.1,
-    uContrast: 1.18,
-    uWarp: 0.9,
-    uGlow: 1.0,
-    uSeed: 29,
-    uMetalness: 0.72,
-    uRoughness: 0.18,
-    uEnv: 1.3,
-    uEmissive: 0.32,
-    uAnisotropy: 0.55,
-    uClearcoat: 0.2,
-    uNormal: 0.18,
-  },
+`,
 };
-
-export const sliderGroups = [
-  {
-    id: "shader",
-    label: "Shader",
-    items: [
-      { key: "uSpeed", label: "速度", min: 0, max: 2, step: 0.01 },
-      { key: "uScale", label: "尺度", min: 0.4, max: 5, step: 0.01 },
-      { key: "uIntensity", label: "亮度", min: 0.3, max: 2, step: 0.01 },
-      { key: "uContrast", label: "对比", min: 0.4, max: 2, step: 0.01 },
-      { key: "uWarp", label: "扭曲", min: 0, max: 2.4, step: 0.01 },
-      { key: "uGlow", label: "发光", min: 0, max: 2, step: 0.01 },
-    ],
-  },
-  {
-    id: "pbr",
-    label: "PBR",
-    items: [
-      { section: "基础", key: "uMetalness", label: "金属度", min: 0, max: 1, step: 0.01 },
-      { key: "uRoughness", label: "粗糙度", min: 0, max: 1, step: 0.01 },
-      { key: "uEnv", label: "环境光", min: 0, max: 2.4, step: 0.01 },
-      { key: "uSpecularIntensity", label: "镜面强度", min: 0, max: 2, step: 0.01 },
-      { key: "uIor", label: "折射率", min: 1, max: 2.33, step: 0.01 },
-      { key: "uEmissive", label: "自发光", min: 0, max: 2, step: 0.01 },
-      { section: "表层", key: "uClearcoat", label: "清漆", min: 0, max: 1, step: 0.01 },
-      { key: "uClearcoatRoughness", label: "清漆粗糙", min: 0, max: 1, step: 0.01 },
-      { key: "uSheen", label: "织物光泽", min: 0, max: 1, step: 0.01 },
-      { key: "uSheenRoughness", label: "织物粗糙", min: 0.07, max: 1, step: 0.01 },
-      { key: "uAnisotropy", label: "各向异性", min: 0, max: 1, step: 0.01 },
-      { key: "uAnisotropyRotation", label: "各向角度", min: 0, max: 6.28, step: 0.01 },
-      { key: "uIridescence", label: "虹彩", min: 0, max: 1, step: 0.01 },
-      { key: "uIridescenceIor", label: "虹彩折射率", min: 1, max: 2.33, step: 0.01 },
-      { key: "uIridescenceThickness", label: "薄膜厚度", min: 100, max: 1000, step: 1 },
-      { section: "体积", key: "uTransmission", label: "透射", min: 0, max: 1, step: 0.01 },
-      { key: "uThickness", label: "体积厚度", min: 0, max: 2, step: 0.01 },
-      { key: "uAttenuationDistance", label: "吸收距离", min: 0.05, max: 10, step: 0.05 },
-      { key: "uDispersion", label: "色散", min: 0, max: 1, step: 0.01 },
-    ],
-  },
-];
-
-export const sliderDefs = sliderGroups.flatMap((group) => group.items);

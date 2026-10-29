@@ -4,25 +4,42 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ShaderMaker</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=20261029-ui7" />
+  <!-- 本地模块带版本号，避免浏览器拿旧缓存配新页面 -->
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+        "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/",
+        "./src/shaders.js": "./src/shaders.js?v=20261029-ui7",
+        "./src/presets.js": "./src/presets.js?v=20261029-ui7",
+        "./src/npr.js": "./src/npr.js?v=20261029-ui7",
+        "./src/stylize.js": "./src/stylize.js?v=20261029-ui7",
+        "./src/nl.js": "./src/nl.js?v=20261029-ui7",
+        "./src/environments.js": "./src/environments.js?v=20261029-ui7",
+        "./src/models.js": "./src/models.js?v=20261029-ui7"
       }
     }
   </script>
 </head>
 <body>
-  <canvas id="stage"></canvas>
-
   <header class="topbar">
     <div class="brand">
       <span class="mark"></span>
-      <div>
-        <strong>ShaderMaker</strong>
-        <p>Three.js · PBR Lookdev</p>
+      <strong>ShaderMaker</strong>
+    </div>
+    <div class="render-switch">
+      <div id="render-modes" class="segmented" role="tablist">
+        <button type="button" data-render="pbr" class="active">PBR 写实</button>
+        <button type="button" data-render="npr">NPR 风格化</button>
+      </div>
+      <div id="npr-presets" class="segmented segmented-sub" hidden></div>
+      <div class="scope-switch" title="NPR 与画面滤镜的作用范围">
+        <span>作用于</span>
+        <div id="scope-modes" class="segmented segmented-mini">
+          <button type="button" data-scope="subject" class="active">仅模型</button>
+          <button type="button" data-scope="global">全局</button>
+        </div>
       </div>
     </div>
     <div class="status">
@@ -31,48 +48,71 @@
     </div>
   </header>
 
-  <aside class="dock dock-left">
-    <section>
-      <h2 id="parameter-title">PBR 参数</h2>
-      <div id="sliders" class="sliders"></div>
-    </section>
-  </aside>
-
-  <aside class="dock dock-environment">
-    <section>
-      <h2>环境</h2>
-      <div id="environments" class="chips"></div>
-    </section>
-  </aside>
-
-  <aside class="dock dock-right">
-    <div id="mode-tabs" class="mode-tabs" role="tablist">
-      <button type="button" class="mode-tab active" data-mode="pbr">PBR</button>
+  <aside class="panel panel-library">
+    <div id="mode-tabs" class="segmented segmented-wide" role="tablist">
+      <button type="button" class="mode-tab active" data-mode="pbr">PBR 材质</button>
       <button type="button" class="mode-tab" data-mode="shader">Shader</button>
     </div>
-
-    <section>
+    <div class="panel-head">
       <h2 id="preset-title">预设</h2>
-      <div id="presets" class="chips"></div>
-    </section>
-
+      <button id="random-variant" type="button" class="ghost-button" hidden>随机变体</button>
+    </div>
+    <div class="panel-scroll">
+      <div id="presets"></div>
+    </div>
   </aside>
 
-  <footer class="composer">
-    <div id="hints" class="hints"></div>
-    <form id="prompt-form">
-      <input
-        id="prompt"
-        type="text"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="用自然语言改效果，例如：加一层清漆，更像玻璃，切到日落环境"
-      />
-      <button type="submit">应用</button>
-    </form>
-    <p id="nl-log" class="nl-log">试试：改成星空 / make it calmer and more purple / 冻结动画</p>
-  </footer>
+  <main class="viewport">
+    <canvas id="stage"></canvas>
+    <div class="viewport-toolbar">
+      <div class="viewport-group">
+        <span>模型</span>
+        <div id="shape-modes" class="segmented segmented-mini"></div>
+      </div>
+      <div id="channel-section" class="viewport-group">
+        <span>通道</span>
+        <div id="channels" class="segmented segmented-mini"></div>
+      </div>
+    </div>
+    <footer class="composer">
+      <div id="hints" class="hints"></div>
+      <form id="prompt-form">
+        <input
+          id="prompt"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="用一句话改效果：换成科幻面板，二次元，切到日落"
+        />
+        <button type="submit">应用</button>
+      </form>
+      <p id="nl-log" class="nl-log">试试：改成锈铁 / 赛璐璐，描边粗一点 / 像素风 / 回到写实</p>
+    </footer>
+  </main>
 
-  <script type="module" src="./src/app.js"></script>
+  <aside class="panel panel-inspector">
+    <div class="panel-scroll">
+      <section class="inspector-section">
+        <h2>环境</h2>
+        <div id="environments" class="option-grid"></div>
+      </section>
+      <section class="inspector-section">
+        <div class="panel-head">
+          <h2>画面滤镜</h2>
+          <div class="look-amount" title="滤镜强度">
+            <input id="style-amount" type="range" min="0" max="1" step="0.01" value="1" />
+            <span id="style-amount-value">100%</span>
+          </div>
+        </div>
+        <div id="styles" class="option-grid"></div>
+      </section>
+      <section class="inspector-section">
+        <h2 id="parameter-title">PBR 参数</h2>
+        <div id="sliders" class="sliders"></div>
+      </section>
+    </div>
+  </aside>
+
+  <script type="module" src="./src/app.js?v=20261029-ui7"></script>
 </body>
 </html>

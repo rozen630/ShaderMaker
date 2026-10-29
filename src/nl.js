@@ -1,5 +1,11 @@
-import { presets } from "./shaders.js";
+import { presets } from "./presets.js";
 import { environments } from "./environments.js";
+import { styles } from "./stylize.js";
+import { nprPresets } from "./npr.js";
+import { displayModels } from "./models.js";
+
+const pbrRenderKeys = ["写实", "真实感", "realistic", "photoreal", "pbr渲染", "回到pbr", "切回pbr"];
+const nprRenderKeys = ["npr", "非真实", "风格化渲染"];
 
 const colorMap = {
   红: [0.86, 0.12, 0.16],
@@ -64,11 +70,23 @@ const presetHints = [
   { id: "acrylic", keys: ["亚克力", "有机玻璃", "acrylic"] },
   { id: "diamond", keys: ["钻石", "水晶", "diamond", "crystal"] },
   { id: "glass", keys: ["玻璃球", "玻璃", "glass"] },
+  { id: "wood", keys: ["木纹", "木头", "木地板", "木板", "wood", "plank"] },
+  { id: "rust", keys: ["锈铁", "生锈", "锈蚀", "铁锈", "rust", "corroded"] },
+  { id: "scifi", keys: ["科幻", "机甲", "面板", "sci-fi", "scifi", "panel"] },
+  { id: "carbon", keys: ["碳纤维", "carbon"] },
+  { id: "rock", keys: ["岩石", "石头", "石块", "rock", "stone"] },
+  { id: "hammered", keys: ["锤纹", "锻打", "锤目", "hammered"] },
+  { id: "tiles", keys: ["瓷砖", "砖", "马赛克", "tile"] },
+  { id: "caustics", keys: ["焦散", "水下", "池底", "caustic"] },
+  { id: "hologram", keys: ["全息", "hologram", "holo"] },
+  { id: "vortex", keys: ["传送门", "漩涡", "星门", "portal", "vortex"] },
+  { id: "rain", keys: ["数字雨", "代码雨", "矩阵", "matrix", "digital rain"] },
+  { id: "cells", keys: ["细胞", "生物", "有机", "cell", "organic"] },
   { id: "lava", keys: ["岩浆", "熔岩", "火山", "lava", "molten", "magma"] },
   { id: "ocean", keys: ["海", "海洋", "水", "浪", "ocean", "sea", "water"] },
   { id: "aurora", keys: ["极光", "aurora", "northern"] },
   { id: "stars", keys: ["星空", "星星", "宇宙", "星河", "star", "space", "galaxy"] },
-  { id: "plasma", keys: ["等离子", "赛博", "故障", "plasma", "cyber"] },
+  { id: "plasma", keys: ["等离子", "plasma"] },
   { id: "marble", keys: ["大理石", "玉", "石纹", "marble"] },
   { id: "fire", keys: ["火", "火焰", "燃烧", "fire", "flame", "ember"] },
   { id: "neon", keys: ["霓虹", "城市", "夜店", "neon", "city"] },
@@ -99,6 +117,8 @@ export function interpretPrompt(raw, state) {
   if (!text) return { ok: false, message: "先输入一句想改的效果。" };
 
   const next = { ...state.params };
+  // 描边粗细由 NPR 处理，不能误触发纹理尺度的「粗 / 细」
+  const patternText = text.replace(/描边[^，,。;；\s]*/g, "");
   const notes = [];
   let shader = state.shader;
   let presetId = state.preset || state.shader;
@@ -158,11 +178,11 @@ export function interpretPrompt(raw, state) {
     next.uContrast = nudge(next.uContrast, 0.16, 0.4, 2);
     notes.push("提高对比");
   }
-  if (/细|更密|zoom in|smaller|tighter|细节/.test(text)) {
+  if (/细(?!胞)|更密|zoom in|smaller|tighter|细节/.test(patternText)) {
     next.uScale = nudge(next.uScale, 0.45, 0.4, 5);
     notes.push("纹路更细");
   }
-  if (/粗|更大|zoom out|bigger|broader|宏大/.test(text)) {
+  if (/粗|更大|zoom out|bigger|broader|宏大/.test(patternText)) {
     next.uScale = nudge(next.uScale, -0.4, 0.4, 5);
     notes.push("纹路更阔");
   }
@@ -259,6 +279,67 @@ export function interpretPrompt(raw, state) {
     notes.push("加强法线");
   }
 
+  let style = state.style;
+  for (const item of Object.values(styles)) {
+    if (item.keys.some((key) => text.includes(key))) {
+      style = item.id;
+      notes.push(item.id === "none" ? "关闭滤镜" : `滤镜切到 ${item.name}`);
+      break;
+    }
+  }
+
+  let render = state.render;
+  let nprPreset = state.nprPreset;
+  for (const item of Object.values(nprPresets)) {
+    if (item.keys.some((key) => text.includes(key))) {
+      render = "npr";
+      nprPreset = item.id;
+      notes.push(`NPR ${item.name}`);
+      break;
+    }
+  }
+  if (render === state.render && nprRenderKeys.some((key) => text.includes(key))) {
+    render = "npr";
+    notes.push("切到 NPR");
+  }
+  if (pbrRenderKeys.some((key) => text.includes(key))) {
+    render = "pbr";
+    style = "none";
+    notes.push("回到 PBR 写实");
+  }
+
+  let displayModel = null;
+  for (const def of Object.values(displayModels)) {
+    if (def.keys.some((key) => text.includes(key))) {
+      displayModel = def.id;
+      notes.push(`展示模型 ${def.label}`);
+      break;
+    }
+  }
+
+  let nprValues = null;
+  if (/描边(更|再)?粗|粗描边|粗一点的描边|thicker outline/.test(text)) {
+    nprValues = { outline: Math.min((state.nprValues?.outline ?? 0.012) + 0.008, 0.04) };
+    notes.push("描边加粗");
+  } else if (/描边(更|再)?细|细描边|thinner outline/.test(text)) {
+    nprValues = { outline: Math.max((state.nprValues?.outline ?? 0.012) - 0.005, 0.003) };
+    notes.push("描边变细");
+  } else if (/去掉描边|不要描边|无描边|no outline/.test(text)) {
+    nprValues = { outline: 0 };
+    notes.push("去掉描边");
+  }
+  if (/阴影(更)?冷|冷色阴影|cool shadow/.test(text)) {
+    nprValues = { ...nprValues, shadowHue: 0.9 };
+    notes.push("冷色阴影");
+  } else if (/阴影(更)?暖|暖色阴影|warm shadow/.test(text)) {
+    nprValues = { ...nprValues, shadowHue: -0.8 };
+    notes.push("暖色阴影");
+  }
+  if (nprValues && render !== "npr") {
+    render = "npr";
+    notes.push("切到 NPR");
+  }
+
   let environment = state.environment;
   for (const env of Object.values(environments)) {
     if (env.keys.some((key) => text.includes(key))) {
@@ -280,12 +361,17 @@ export function interpretPrompt(raw, state) {
     preset: presetId,
     shader,
     environment,
+    style,
+    render,
+    nprPreset,
+    nprValues,
+    displayModel,
     params: next,
     message: notes.join(" · "),
   };
 }
 
 export const hintPrompts = {
-  pbr: ["回到 lookdev", "换成拉丝钢", "换成磨砂玻璃", "做成珍珠虹彩", "增加色散"],
-  shader: ["改成岩浆，慢一点", "改成星空", "make it calmer and more purple", "冻结动画"],
+  pbr: ["换成拉丝钢", "做成珍珠虹彩", "二次元渲染", "赛璐璐，描边粗一点", "厚涂，暖色阴影", "回到写实"],
+  shader: ["换成科幻面板", "改成锈铁，二次元", "全息，更蓝", "像素风", "漫画滤镜", "回到写实"],
 };
