@@ -1,6 +1,6 @@
 {
   "name": "shadermaker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "ShaderMaker 材质与 Shader 预览工作台",
