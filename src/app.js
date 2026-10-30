@@ -302,9 +302,9 @@ const state = {
   mode: "pbr",
   pbrCategory: "all",
   shaderCategory: "all",
-  // 进来默认是风格化红砖：带置换，一打开就能看到曲面细分后的起伏（Lookdev 色卡球留在材质库「校准」里）
-  preset: "stylizedBrick",
-  shader: "stylizedBrick",
+  // 进来默认是雪地：积雪带置换，一打开就能看到曲面细分后的起伏（Lookdev 色卡球留在材质库「校准」里）
+  preset: "snow",
+  shader: "snow",
   environment: defaultEnvironment,
   style: defaultStyle,
   render: "pbr",
@@ -314,7 +314,7 @@ const state = {
   displayModel: defaultDisplayModel,
   nprPreset: defaultNprPreset,
   channel: "final",
-  params: { ...presets.stylizedBrick },
+  params: { ...presets.snow },
 };
 
 const stylizer = createStylizer(renderer, scene, camera);
@@ -1391,7 +1391,7 @@ initVoxelControls();
 setStyle(defaultStyle);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
-setPreset("stylizedBrick", presets.stylizedBrick);
+setPreset("snow", presets.snow);
 setEnvironment(defaultEnvironment);
 setDisplayModel(defaultDisplayModel);
 syncViewport(true);
