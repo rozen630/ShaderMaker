@@ -3,13 +3,23 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { vertexShader, shaders, channelShaders } from "./shaders.js";
-import { presets, pbrCategories, sliderGroups, sliderDefs } from "./presets.js";
+import { presets, pbrCategories, shaderCategories, sliderGroups, sliderDefs } from "./presets.js";
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 import { createStylizer, styles, defaultStyle, MASK_LAYER } from "./stylize.js";
 import { createNpr, nprPresets, nprSliders, defaultNprPreset } from "./npr.js";
 import { displayModels, defaultDisplayModel, loadDisplayModel, calibrationColor } from "./models.js";
 import { voxelResolution, voxelPresets, applyVoxelSupport, voxelize, buildVoxelMesh } from "./voxel.js";
+import {
+  applyTriplanar,
+  updateTriplanar,
+  createTiler,
+  triplanarUniforms,
+  triplanarVertexHead,
+  triplanarVertexBody,
+  triplanarFragmentHead,
+} from "./triplanar.js";
+import { applyMaterialFx, materialFxUniforms } from "./materialFx.js";
 
 const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
@@ -111,6 +121,8 @@ const shaderUniforms = {
   uWarp: { value: 0 },
   uGlow: { value: 0 },
   uSeed: { value: 1 },
+  // 每个 Shader 在速度 1 时的动画快慢（shaders.js 的 timeScales），让「速度 1」对所有 Shader 都是自然速度
+  uTimeScale: { value: 1 },
 };
 
 function makeSurfaceMaterial(fragment) {
@@ -163,6 +175,7 @@ function renderThumbnail(preset) {
     thumbUniforms[key].value = preset[key];
   }
   thumbUniforms.uTime.value = 4.2;
+  thumbUniforms.uTimeScale.value = shader.timeScale ?? 1;
   thumbUniforms.uResolution.value.set(THUMB_SIZE, THUMB_SIZE);
   renderer.setRenderTarget(thumbTarget);
   renderer.render(thumbScene, surfaceCamera);
@@ -263,6 +276,11 @@ nprSubjectMaterial.normalScale = cubeMaterial.normalScale;
 // 体素：PBR / NPR 材质都打上体素补丁（实例化时按每块的 voxelUv 取贴图），校色件体素用实例颜色
 applyVoxelSupport(cubeMaterial);
 applyVoxelSupport(nprSubjectMaterial);
+// 程序贴图改用三向投影，避免模型 UV 接缝处的裂缝
+applyTriplanar(cubeMaterial);
+applyTriplanar(nprSubjectMaterial);
+// 次表面散射、积雪（只在写实材质上）
+applyMaterialFx(cubeMaterial);
 const voxelNeutralMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0 });
 applyVoxelSupport(voxelNeutralMaterial);
 let voxelGroup = null;
@@ -283,8 +301,10 @@ const state = {
   tier: savedTier(),
   mode: "pbr",
   pbrCategory: "all",
-  preset: "lookdev",
-  shader: "lookdev",
+  shaderCategory: "all",
+  // 进来默认是风格化红砖：带置换，一打开就能看到曲面细分后的起伏（Lookdev 色卡球留在材质库「校准」里）
+  preset: "stylizedBrick",
+  shader: "stylizedBrick",
   environment: defaultEnvironment,
   style: defaultStyle,
   render: "pbr",
@@ -294,7 +314,7 @@ const state = {
   displayModel: defaultDisplayModel,
   nprPreset: defaultNprPreset,
   channel: "final",
-  params: { ...presets.lookdev },
+  params: { ...presets.stylizedBrick },
 };
 
 const stylizer = createStylizer(renderer, scene, camera);
@@ -318,13 +338,16 @@ const channelMaterial = new THREE.ShaderMaterial({
     tEmissive: { value: emissiveTarget.texture },
     uChannel: { value: 1 },
     uUvRepeat: { value: 1 },
+    ...triplanarUniforms,
   },
   vertexShader: /* glsl */ `
 varying vec2 vUv;
+${triplanarVertexHead}
 #ifdef USE_INSTANCING
 attribute vec2 voxelUv;
 #endif
 void main() {
+${triplanarVertexBody}
   vUv = uv;
   vec4 local = vec4(position, 1.0);
 #ifdef USE_INSTANCING
@@ -343,16 +366,17 @@ uniform sampler2D tEmissive;
 uniform int uChannel;
 uniform float uUvRepeat;
 varying vec2 vUv;
+${triplanarFragmentHead}
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
 void main() {
   vec2 uv = vUv * uUvRepeat;
-  vec3 orm = texture2D(tOrm, uv).rgb;
-  vec3 c = texture2D(tAlbedo, uv).rgb;
+  vec3 orm = triSample(tOrm, uv).rgb;
+  vec3 c = triSample(tAlbedo, uv).rgb;
   if (uChannel == 2) c = toLinear(vec3(orm.r));
   else if (uChannel == 3) c = toLinear(vec3(orm.g));
   else if (uChannel == 4) c = toLinear(vec3(orm.b));
-  else if (uChannel == 5) c = toLinear(texture2D(tNormal, uv).rgb);
-  else if (uChannel == 6) c = texture2D(tEmissive, uv).rgb;
+  else if (uChannel == 5) c = toLinear(triSample(tNormal, uv).rgb);
+  else if (uChannel == 6) c = triSample(tEmissive, uv).rgb;
   gl_FragColor = vec4(c, 1.0);
 }
 `,
@@ -521,8 +545,22 @@ function applyPhysical(params) {
   cubeMaterial.aoMap = mapped ? ormTarget.texture : null;
   cubeMaterial.normalMap = mapped ? normalTarget.texture : null;
   cubeMaterial.emissiveMap = mapped ? emissiveTarget.texture : null;
-  if (mapped) cubeMaterial.color.setRGB(1, 1, 1);
+  // VFX 特效的贴图同时是底色和自发光；底色压暗，否则被环境光照亮后整体发灰，看不出发光
+  const vfx = state.mode === "shader" && state.shader !== "lookdev" && shaders[state.shader]?.kind !== "surface";
+  if (mapped) cubeMaterial.color.setScalar(vfx ? 0.08 : 1);
   else cubeMaterial.color.setRGB(...params.uColorB);
+  materialFxUniforms.uSss.value = params.uSss ?? 0;
+  materialFxUniforms.uSssColor.value.setRGB(...(params.uAttenuationColor || [1, 1, 1]));
+  materialFxUniforms.uSnow.value = params.uSnow ?? 0;
+  materialFxUniforms.uSnowDepth.value = params.uSnowDepth ?? 0.05;
+  // 置换只对 Surface Shader 有意义（ORM 的 alpha 里才有高度），体素开着时不推
+  materialFxUniforms.uDisplace.value = mapped && !state.voxelOn && shaders[state.shader]?.kind === "surface" ? params.uDisplace ?? 0 : 0;
+  materialFxUniforms.tDisplace.value = ormTarget.texture;
+  materialFxUniforms.uIceLayers.value = params.uIceLayers ?? 0;
+  if (params.uIceLayers) {
+    materialFxUniforms.uIceDeepColor.value.setRGB(...params.uColorA);
+    materialFxUniforms.uIcePlateColor.value.setRGB(...params.uColorB).lerp(new THREE.Color(...params.uAccent), 0.45);
+  }
   cubeMaterial.opacity = 1;
   cubeMaterial.transparent = params.uTransmission > 0.001;
   cubeMaterial.needsUpdate = true;
@@ -569,6 +607,7 @@ function setPreset(id, params = presets[id] || state.params) {
   state.shader = shaderId;
   albedoMaterial.fragmentShader = shader.fragment;
   albedoMaterial.needsUpdate = true;
+  shaderUniforms.uTimeScale.value = shader.timeScale ?? 1;
 
   applyParams({ ...params, shader: shaderId });
   highlightMode();
@@ -982,23 +1021,36 @@ function createPresetButton(id, preset) {
   return button;
 }
 
-function createPbrCategoryTabs(entries) {
+// Shader 预设归到哪一组：VFX 单独一组，Surface 按 shaderCategories 归类，没归类的放「其他」
+const SHADER_OTHER = { id: "other", label: "其他" };
+const VFX_CATEGORY = { id: "vfx", label: "VFX · 自发光特效" };
+
+function shaderCategoryOf(id, preset) {
+  if ((shaders[preset.shader]?.kind || "vfx") !== "surface") return VFX_CATEGORY.id;
+  return shaderCategories.find((category) => category.items.includes(id))?.id || SHADER_OTHER.id;
+}
+
+function libraryCategories() {
+  return state.mode === "pbr"
+    ? { list: pbrCategories, of: (id, preset) => preset.category, key: "pbrCategory" }
+    : { list: [...shaderCategories, SHADER_OTHER, VFX_CATEGORY], of: shaderCategoryOf, key: "shaderCategory" };
+}
+
+// Pro 模式的分类筛选（Lite 由 CSS 隐藏，并且始终显示全部）
+function createCategoryTabs(entries) {
+  const { list, of, key } = libraryCategories();
   const tabs = document.createElement("div");
   tabs.className = "pbr-category-tabs";
-  const categories = [{ id: "all", label: "全部" }, ...pbrCategories];
-  for (const category of categories) {
-    const count =
-      category.id === "all"
-        ? entries.length
-        : entries.filter(([, preset]) => preset.category === category.id).length;
+  for (const category of [{ id: "all", label: "全部" }, ...list]) {
+    const count = category.id === "all" ? entries.length : entries.filter(([id, preset]) => of(id, preset) === category.id).length;
     if (!count) continue;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "category-chip";
-    button.classList.toggle("active", state.pbrCategory === category.id);
+    button.classList.toggle("active", state[key] === category.id);
     button.textContent = `${category.label} ${count}`;
     button.addEventListener("click", () => {
-      state.pbrCategory = category.id;
+      state[key] = category.id;
       renderPresets();
       highlightPreset();
     });
@@ -1013,7 +1065,7 @@ function renderPresets() {
   if (presetTitle) presetTitle.textContent = state.mode === "pbr" ? `PBR 材质库 · ${entries.length}` : `Shader 预设 · ${entries.length}`;
   if (state.mode === "pbr") {
     presetRoot.className = "preset-library";
-    presetRoot.append(createPbrCategoryTabs(entries));
+    presetRoot.append(createCategoryTabs(entries));
     for (const category of pbrCategories) {
       const activeCategory = state.tier === "pro" ? state.pbrCategory : "all";
       if (activeCategory !== "all" && activeCategory !== category.id) continue;
@@ -1030,14 +1082,12 @@ function renderPresets() {
     }
   } else {
     presetRoot.className = "shader-library";
-    const categories = [
-      { kind: "surface", label: "Surface · PBR" },
-      { kind: "vfx", label: "VFX · 自发光特效" },
-    ];
-    for (const category of categories) {
-      const categoryEntries = entries.filter(
-        ([, preset]) => (shaders[preset.shader]?.kind || "vfx") === category.kind
-      );
+    presetRoot.append(createCategoryTabs(entries));
+    const { list, of } = libraryCategories();
+    const activeCategory = state.tier === "pro" ? state.shaderCategory : "all";
+    for (const category of list) {
+      if (activeCategory !== "all" && activeCategory !== category.id) continue;
+      const categoryEntries = entries.filter(([id, preset]) => of(id, preset) === category.id);
       if (!categoryEntries.length) continue;
       const group = document.createElement("div");
       group.className = "shader-category";
@@ -1296,16 +1346,23 @@ new ResizeObserver(() => requestViewportSync(false)).observe(canvas);
 
 const clock = new THREE.Clock();
 
+// 每张程序贴图先画到中间缓冲，再做成可平铺写进最终贴图（三向投影重复处不留接缝）
+const tiler = createTiler(1024);
+
 function drawChannel(material, target) {
   surfaceMesh.material = material;
-  renderer.setRenderTarget(target);
+  renderer.setRenderTarget(tiler.target);
   renderer.render(surfaceScene, surfaceCamera);
+  tiler.resolve(renderer, target);
 }
 
 function tick() {
   const elapsed = clock.getElapsedTime();
   shaderUniforms.uTime.value = elapsed;
-  display.rotation.y = elapsed * 0.18;
+  materialFxUniforms.uFxTime.value = elapsed;
+  materialFxUniforms.uFxFlow.value = elapsed * (state.params.uSpeed ?? 0) * (shaders[state.shader]?.timeScale ?? 1);
+  // 模型不自动旋转，用鼠标拖动视角查看
+  updateTriplanar(display);
   controls.update();
   camera.updateMatrixWorld();
   npr.updateKeyLight(keyLight, camera);
@@ -1334,7 +1391,7 @@ initVoxelControls();
 setStyle(defaultStyle);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
-setPreset("lookdev", presets.lookdev);
+setPreset("stylizedBrick", presets.stylizedBrick);
 setEnvironment(defaultEnvironment);
 setDisplayModel(defaultDisplayModel);
 syncViewport(true);

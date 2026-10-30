@@ -19,9 +19,20 @@
 1. 左侧材质库分成两个标签：**PBR 材质** 和 **Shader**。
 2. **PBR** 内置 26 个材质，按校准、金属、介质、涂层、织物、透明体、光学分类。覆盖常见金属、塑料、橡胶、陶瓷、车漆、丝绒、玻璃、水、钻石和虹彩薄膜。
 3. PBR 参数覆盖 `MeshPhysicalMaterial` 的金属度、粗糙度、镜面、IOR、清漆、Sheen、各向异性、虹彩、透射、体积吸收和色散。
-4. **Shader** 内置 20 个程序纹理，带实时缩略图卡片：
-   - **Surface · PBR**（10）：岩浆、海洋、大理石、木纹、锈铁、科幻面板、碳纤维、岩石、锤纹金属、釉面瓷砖
-   - **VFX**（10）：极光、等离子、星空、火焰、霓虹、焦散、全息、传送门、数字雨、细胞
+4. **Shader** 内置 58 个程序纹理，带实时缩略图卡片，按类别分组（Pro 模式可筛选，分组定义在 `src/presets.js` 的 `shaderCategories`）：
+   - **宝石 · 冰晶**：冰面、钻石切面、水晶、祖母绿、琥珀、翡翠、晶簇——程序贴图 + 透射 / 折射率 / 色散等物理参数
+   - **金属**：划痕拉丝、掉漆金属、大马士革钢、铜绿、液态金属、锈铁、锤纹金属
+   - **石材 · 陶瓷**：风格化红砖、石灰岩砖、苔藓石墙、剥落墙面、马赛克、木模混凝土、清水混凝土、抛光花岗岩、水磨石、大理石、岩石、釉面瓷砖、金缮
+   - **自然**：沙丘、雪地、车辙雪地、老树皮、岩浆、龟裂熔岩、海洋、木纹
+   - **有机 · 织物**：荔枝纹皮革、丝织、龙鳞、生物荧光
+   - **科幻**：科幻面板、六角装甲、电路板、碳纤维、镭射膜
+   - **VFX**（14）：极光、等离子、星空、火焰、霓虹、焦散、全息、传送门、数字雨、细胞、星云、能量护盾、等离子网、电弧
+   - **速度统一**：速度 1 = 每个效果的自然速度，动态效果默认 1、静态写实材质默认 0；各效果的快慢集中在 `src/shaders.js` 末尾的 `timeScales`。
+   - VFX 特效的底色自动压暗，靠自发光出效果，不会被环境光照成一片灰。
+   - **次表面散射**（冰、翡翠、琥珀、大理石、磨砂玻璃、珍珠、雪）、**冰下碎冰**（视差层：表面下几层缓慢漂移的碎冰板，转动视角能看出纵深）和**积雪覆盖**在 Pro 的参数里可调（`src/materialFx.js`）。
+   - **置换**：Surface Shader 的高度写在 ORM 贴图的 alpha 通道，顶点着色器按三向投影读出来真的把表面推出去（砖缝凹进去、石头鼓起来），「置换高度」滑条控制；体素开着时不置换。
+   - 积雪会真的鼓起来：展示模型加载时做了均匀细分（`src/models.js` 的 `densify`，共享边同一个中点，置换不会裂缝），雪沿平均法线外推，「积雪厚度」控制高度；体素化仍用细分前的网格。
+   - 程序贴图用**三向投影**（triplanar）贴到模型上，不走模型 UV，所以 UV 岛之间、球体接缝处都不会裂开；贴图每帧额外做一次可平铺处理，投影重复处也没有接缝（`src/triplanar.js`）。体素每块只取一个颜色，仍按 UV 取样。
    - 「随机变体」整体旋转色相、换噪声种子，快速找配色。
 5. 顶栏：**渲染模式** + **作用范围**。
    - **PBR / NPR 一键切换**：两种模式共用同一份材质（底色、ORM、法线、自发光），只换光照模型。
@@ -29,7 +40,7 @@
    - **作用于：仅模型 / 全局**。仅模型时背景保持写实 HDR，NPR 材质输出 ACES 反函数抵消画面色调映射，滤镜按主体遮罩生效（不开 Bloom）；全局时背景也换成平涂底色。
 6. 右侧：环境（摄影棚 / 日落 / 夜景 / 户外广场）和**画面滤镜**（像素 / 漫画 / 油画 / 素描 / 赛博 / 胶片 / 蓝图）。
    - **NPR 与滤镜的区别**：NPR 是材质 Shader，着色时就知道法线、光源、阴影和材质属性；滤镜是相机后处理，只拿到渲染好的 2D 像素。两者可以叠加。
-7. 展示方式参照 MaterialX Viewer：模型悬浮在清晰的 HDR 环境前（Poly Haven 2k，CC0），不放地面、背景板和台座。视口左上角可切换展示**模型**：
+7. 打开时默认材质是风格化红砖（带置换，能直接看到曲面细分的效果；Lookdev 色卡球在材质库「校准」里）。展示方式参照 MaterialX Viewer：模型悬浮在清晰的 HDR 环境前（Poly Haven 2k，CC0），不放地面、背景板和台座；模型不自动旋转，拖动画面查看。右侧面板可切换展示**模型**：
    - **Shader Ball**（默认）：MaterialX 的 shaderball。外壳挂当前材质；内芯色环和灰底盘是校色参照，任何模式下都保持写实，不参与 NPR / 描边。程序贴图在外壳上平铺 2 次。
    - **球 / 方块**（圆角）：和 Shader Ball 共用同一个取景框，切换时画面大小一致。
    - NPR 描边使用预先算好的平滑法线外扩，凹面和硬边都不会错位。
@@ -103,6 +114,7 @@ npm run build:plugin   # 生成 dist/cindy-plugin/
 ## 第三方资源
 
 - `assets/models/materialx-shaderball.glb`：MaterialX Viewer 的默认 Shader Ball，来自 [AcademySoftwareFoundation/MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX/tree/main/resources/Geometry)，Apache License 2.0，授权原文见 `assets/models/MATERIALX-LICENSE.txt`。内芯色环为 ShaderMaker 程序生成，不是原始资源的一部分。
+- `src/vendor/tileable-shaders.js`：[tuxalin/procedural-tileable-shaders](https://github.com/tuxalin/procedural-tileable-shaders)（MIT，授权原文见 `src/vendor/TILEABLE-SHADERS-LICENSE.txt`），新版 Shader 用到的可平铺噪声、Voronoi、裂纹、六边形、编织、Domain Warping。原库有几处类型错误编译不过，做了最小修补，改动处标了「ShaderMaker」。
 - HDR 环境：[Poly Haven](https://polyhaven.com/hdris)（CC0），网页版运行时从 Poly Haven CDN 加载 2k 版本；Cindy 插件版把 1k 版本打进包里。
 
 ## 版本管理

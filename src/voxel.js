@@ -80,9 +80,11 @@ export function voxelize(meshes, relativeTo, resolution) {
   const bounds = new THREE.Box3();
   const entries = meshes.map(({ mesh, kind }) => {
     const matrix = new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld);
-    mesh.geometry.computeBoundingBox();
-    bounds.union(mesh.geometry.boundingBox.clone().applyMatrix4(matrix));
-    return { mesh, kind, matrix };
+    // 有细分的网格用细分前的版本采样（userData.voxelGeometry），结果一样、快很多
+    const geometry = mesh.userData.voxelGeometry || mesh.geometry;
+    geometry.computeBoundingBox();
+    bounds.union(geometry.boundingBox.clone().applyMatrix4(matrix));
+    return { mesh, kind, matrix, geometry };
   });
   const size = (bounds.max.y - bounds.min.y) / resolution;
   const origin = bounds.min.clone().subScalar(size * 0.5);
@@ -94,8 +96,7 @@ export function voxelize(meshes, relativeTo, resolution) {
   // key -> 离体素中心最近的采样（UV 取最近的，避免跨 UV 接缝时取平均）
   const cells = new Map();
 
-  for (const { mesh, kind, matrix } of entries) {
-    const geometry = mesh.geometry;
+  for (const { kind, matrix, geometry } of entries) {
     const position = geometry.attributes.position;
     const uv = geometry.attributes.uv;
     const index = geometry.index;

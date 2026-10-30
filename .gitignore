@@ -4,7 +4,7 @@
 .vscode/
 .claude/
 tmp/
-vendor/
+/vendor/
 node_modules/
 dist/
 .cache/
