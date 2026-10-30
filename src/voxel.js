@@ -9,9 +9,12 @@ export const voxelPresets = { coarse: 28, medium: 48, fine: 72 };
 
 const UV_MACROS = ["MAP_UV", "ROUGHNESSMAP_UV", "METALNESSMAP_UV", "AOMAP_UV", "EMISSIVEMAP_UV", "NORMALMAP_UV"];
 
+// FX_VOXEL_FACE / FX_HAS_VOXEL_UV：告诉 materialFx.js 这里已声明 vVoxelFace / voxelUv（置换拉长方块时重算面上的格子）
 const voxelVertexHead = /* glsl */ `
 varying vec2 vVoxelFace;
+#define FX_VOXEL_FACE
 #ifdef USE_INSTANCING
+#define FX_HAS_VOXEL_UV
 attribute vec2 voxelUv;
 ${UV_MACROS.map((name) => `#ifdef ${name}\n#undef ${name}\n#define ${name} voxelUv\n#endif`).join("\n")}
 #endif
@@ -19,9 +22,10 @@ ${UV_MACROS.map((name) => `#ifdef ${name}\n#undef ${name}\n#define ${name} voxel
 
 const voxelFragmentHead = /* glsl */ `
 varying vec2 vVoxelFace;
-// 体素面边缘轻微压暗，让一块块的轮廓读得出来
+// 体素面边缘轻微压暗，让一块块的轮廓读得出来（face 以格为单位，拉长的方块每格都压一圈）
 float voxelEdge(vec2 face) {
-  vec2 d = min(face, 1.0 - face);
+  vec2 f = fract(face);
+  vec2 d = min(f, 1.0 - f);
   return mix(0.88, 1.0, smoothstep(0.0, 0.1, min(d.x, d.y)));
 }
 `;
@@ -73,7 +77,7 @@ const tmpC = new THREE.Vector3();
 const point = new THREE.Vector3();
 
 // meshes: [{ mesh, kind: "material" | "neutral" }]；relativeTo: 体素所在的父节点（display 组）
-// 返回 { size, material: [...], neutral: [...] }，每项 { position, uv, local, ao }
+// 返回 { size, material: [...], neutral: [...] }，每项 { position, uv, local, normal, ao }
 export function voxelize(meshes, relativeTo, resolution) {
   relativeTo.updateMatrixWorld(true);
   const inverse = new THREE.Matrix4().copy(relativeTo.matrixWorld).invert();
@@ -101,6 +105,7 @@ export function voxelize(meshes, relativeTo, resolution) {
     const uv = geometry.attributes.uv;
     const index = geometry.index;
     const triangleCount = index ? index.count / 3 : position.count / 3;
+    const faceNormal = new THREE.Vector3();
     const corner = (t, k) => (index ? index.getX(t * 3 + k) : t * 3 + k);
     for (let t = 0; t < triangleCount; t += 1) {
       const ia = corner(t, 0);
@@ -109,7 +114,9 @@ export function voxelize(meshes, relativeTo, resolution) {
       tmpA.fromBufferAttribute(position, ia).applyMatrix4(matrix);
       tmpB.fromBufferAttribute(position, ib).applyMatrix4(matrix);
       tmpC.fromBufferAttribute(position, ic).applyMatrix4(matrix);
-      const area = point.subVectors(tmpB, tmpA).cross(tmpC.clone().sub(tmpA)).length() * 0.5;
+      faceNormal.subVectors(tmpB, tmpA).cross(point.subVectors(tmpC, tmpA));
+      const area = faceNormal.length() * 0.5;
+      faceNormal.normalize();
       // 采样密度：每个体素面积上约 4 个点，保证不漏格
       const steps = Math.max(1, Math.ceil(Math.sqrt((area / (size * size)) * 4)));
       for (let i = 0; i <= steps; i += 1) {
@@ -136,7 +143,8 @@ export function voxelize(meshes, relativeTo, resolution) {
             .multiplyScalar(a)
             .addScaledVector(new THREE.Vector3().fromBufferAttribute(position, ib), b)
             .addScaledVector(new THREE.Vector3().fromBufferAttribute(position, ic), c);
-          cells.set(key, { kind, distance, position: new THREE.Vector3(cx, cy, cz), uv: [u, v], local });
+          // normal：所在三角形的朝向（展示空间），积雪 / 置换按它决定方块往哪长
+          cells.set(key, { kind, distance, position: new THREE.Vector3(cx, cy, cz), uv: [u, v], local, normal: faceNormal.clone() });
         }
       }
     }
@@ -144,7 +152,7 @@ export function voxelize(meshes, relativeTo, resolution) {
 
   const result = { size, material: [], neutral: [] };
   for (const [key, cell] of cells) {
-    const voxel = { position: cell.position, uv: cell.uv, local: cell.local, ao: neighborAo(cells, key, dims) };
+    const voxel = { position: cell.position, uv: cell.uv, local: cell.local, normal: cell.normal, ao: neighborAo(cells, key, dims) };
     result[cell.kind].push(voxel);
   }
   return result;
@@ -162,6 +170,12 @@ export function buildVoxelMesh(voxels, size, material, colorOf = null) {
   const uvs = new Float32Array(voxels.length * 2);
   voxels.forEach((voxel, i) => uvs.set(voxel.uv, i * 2));
   geometry.setAttribute("voxelUv", new THREE.InstancedBufferAttribute(uvs, 2));
+  // 材质体素带表面朝向（materialFx.js 按它做置换 / 积雪）；校色件体素不带，保持不动
+  if (!colorOf) {
+    const normals = new Float32Array(voxels.length * 3);
+    voxels.forEach((voxel, i) => normals.set([voxel.normal.x, voxel.normal.y, voxel.normal.z], i * 3));
+    geometry.setAttribute("voxelNormal", new THREE.InstancedBufferAttribute(normals, 3));
+  }
   const mesh = new THREE.InstancedMesh(geometry, material, voxels.length);
   const matrix = new THREE.Matrix4();
   const color = new THREE.Color();

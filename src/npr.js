@@ -2,6 +2,7 @@
 // 实现：给 MeshToonMaterial 打补丁，灯光（含阴影）只累计「受光量」，最后统一分阶、上阴影色、
 // 加硬高光 / 边缘光 / 分阶金属反射；描边用沿顶点方向外扩的背面外壳。
 import * as THREE from "three";
+import { applyFxVertex } from "./materialFx.js";
 
 export const nprPresets = {
   cel: {
@@ -289,14 +290,16 @@ export function createNpr() {
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uOutline = outlineWidth;
       shader.vertexShader = shader.vertexShader
-        .replace("void main() {", "uniform float uOutline;\nattribute vec3 outlineNormal;\nvoid main() {")
+        .replace("void main() {", "uniform float uOutline;\nvoid main() {")
         // 除以模型缩放，让描边在世界空间里粗细一致（Shader Ball 被缩小了好几倍）
         .replace(
           "#include <begin_vertex>",
           "vec3 transformed = position + outlineNormal * (uOutline / max(length(modelMatrix[0].xyz), 1e-4));"
         );
     };
-    material.customProgramCacheKey = () => "shadermaker-outline-2";
+    material.customProgramCacheKey = () => "shadermaker-outline-3";
+    // 外壳跟着主体的积雪 / 置换一起推出去（outlineNormal 由 applyFxVertex 声明）
+    applyFxVertex(material);
     if (!target.geometry.attributes.outlineNormal) computeOutlineNormals(target.geometry);
     const hull = new THREE.Mesh(target.geometry, material);
     hull.userData.source = source;

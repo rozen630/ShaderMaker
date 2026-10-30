@@ -19,7 +19,7 @@ import {
   triplanarVertexBody,
   triplanarFragmentHead,
 } from "./triplanar.js";
-import { applyMaterialFx, materialFxUniforms } from "./materialFx.js";
+import { applyMaterialFx, applyFxVertex, materialFxUniforms } from "./materialFx.js";
 
 const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
@@ -279,8 +279,12 @@ applyVoxelSupport(nprSubjectMaterial);
 // 程序贴图改用三向投影，避免模型 UV 接缝处的裂缝
 applyTriplanar(cubeMaterial);
 applyTriplanar(nprSubjectMaterial);
-// 次表面散射、积雪（只在写实材质上）
+// 次表面散射、积雪、置换、冰下碎冰：写实和卡通材质都打（卡通版光照分阶）
 applyMaterialFx(cubeMaterial);
+applyMaterialFx(nprSubjectMaterial, { toon: true });
+// 阴影也要跟着积雪 / 置换推出去，否则影子还是原来的形状
+const displacedDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+applyFxVertex(displacedDepthMaterial);
 const voxelNeutralMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0 });
 applyVoxelSupport(voxelNeutralMaterial);
 let voxelGroup = null;
@@ -344,12 +348,14 @@ const channelMaterial = new THREE.ShaderMaterial({
 varying vec2 vUv;
 ${triplanarVertexHead}
 #ifdef USE_INSTANCING
+#define FX_HAS_VOXEL_UV
 attribute vec2 voxelUv;
 #endif
 void main() {
 ${triplanarVertexBody}
   vUv = uv;
-  vec4 local = vec4(position, 1.0);
+  #include <begin_vertex>
+  vec4 local = vec4(transformed, 1.0);
 #ifdef USE_INSTANCING
   vUv = voxelUv;
   local = instanceMatrix * local;
@@ -381,6 +387,8 @@ void main() {
 }
 `,
 });
+// 看通道时形状也和最终一致（积雪 / 置换照样推出去）
+applyFxVertex(channelMaterial, { declareTri: false });
 
 
 function presetFamily(preset) {
@@ -553,8 +561,8 @@ function applyPhysical(params) {
   materialFxUniforms.uSssColor.value.setRGB(...(params.uAttenuationColor || [1, 1, 1]));
   materialFxUniforms.uSnow.value = params.uSnow ?? 0;
   materialFxUniforms.uSnowDepth.value = params.uSnowDepth ?? 0.05;
-  // 置换只对 Surface Shader 有意义（ORM 的 alpha 里才有高度），体素开着时不推
-  materialFxUniforms.uDisplace.value = mapped && !state.voxelOn && shaders[state.shader]?.kind === "surface" ? params.uDisplace ?? 0 : 0;
+  // 置换只对 Surface Shader 有意义（ORM 的 alpha 里才有高度）；体素开着时按块拉长（materialFx.js）
+  materialFxUniforms.uDisplace.value = mapped && shaders[state.shader]?.kind === "surface" ? params.uDisplace ?? 0 : 0;
   materialFxUniforms.tDisplace.value = ormTarget.texture;
   materialFxUniforms.uIceLayers.value = params.uIceLayers ?? 0;
   if (params.uIceLayers) {
@@ -704,6 +712,7 @@ function applyVoxel() {
       if (data.material.length) {
         const mesh = buildVoxelMesh(data.material, data.size, cubeMaterial);
         mesh.userData.voxelKind = "material";
+        mesh.customDepthMaterial = displacedDepthMaterial;
         built.add(mesh);
       }
       if (data.neutral.length) {
@@ -716,6 +725,7 @@ function applyVoxel() {
         mesh.userData.display = true;
       }
       built.userData.count = data.material.length + data.neutral.length;
+      built.userData.size = data.size;
       built.userData.ms = Math.round(performance.now() - started);
     }
     // Map 按插入顺序排列：重新插到末尾，超出上限时淘汰最早的
@@ -727,6 +737,7 @@ function applyVoxel() {
     }
     voxelGroup = built;
     display.add(built);
+    materialFxUniforms.uVoxelSize.value = built.userData.size;
   }
   applyPhysical(state.params);
   refreshRenderState();
@@ -793,6 +804,7 @@ async function setDisplayModel(id) {
     mesh.userData.display = true;
   }
   for (const mesh of parts.materialMeshes) {
+    mesh.customDepthMaterial = displacedDepthMaterial;
     npr.makeOutline(mesh, { source: nprSubjectMaterial, stencil: true }).layers.enable(MASK_LAYER);
   }
   display.rotation.set(0, 0, 0);

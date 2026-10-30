@@ -1,6 +1,7 @@
 // 一键风格化：作为后处理叠在 PBR 渲染之上，不改材质。
 // 管线：RenderPass → Bloom → OutputPass（色调映射 + sRGB）→ StylePass（显示空间）
 import * as THREE from "three";
+import { applyFxVertex } from "./materialFx.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -207,14 +208,20 @@ void main() {
 }
 `;
 
-// 输出 view-space 法线（rgb）与线性深度（a），只给描边用
+// 输出 view-space 法线（rgb）与线性深度（a），只给描边用。
+// 支持体素（实例化）和主体的积雪 / 置换外推（applyFxVertex 接在 begin_vertex 后面）
 const normalDepthMaterial = new THREE.ShaderMaterial({
   side: THREE.DoubleSide,
   vertexShader: /* glsl */ `
 varying vec3 vNormalView;
 varying float vDepth;
 void main() {
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  #include <begin_vertex>
+  vec4 local = vec4(transformed, 1.0);
+#ifdef USE_INSTANCING
+  local = instanceMatrix * local;
+#endif
+  vec4 mv = modelViewMatrix * local;
   vNormalView = normalize(normalMatrix * normal);
   vDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
@@ -230,6 +237,7 @@ void main() {
 }
 `,
 });
+applyFxVertex(normalDepthMaterial);
 
 export function createStylizer(renderer, scene, camera) {
   // stencilBuffer：NPR 主体描边靠模板缓冲避开主体本身
@@ -261,6 +269,7 @@ export function createStylizer(renderer, scene, camera) {
   const maskTarget = new THREE.WebGLRenderTarget(1, 1);
   stylePass.uniforms.tMask.value = maskTarget.texture;
   const maskMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  applyFxVertex(maskMaterial);
   let subjectOnly = true;
   const clearColor = new THREE.Color();
 
