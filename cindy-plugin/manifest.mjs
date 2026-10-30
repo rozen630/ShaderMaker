@@ -12,9 +12,9 @@ export function buildManifest(catalog, version) {
     minCindyVersion: "0.1.120",
     id: "shadermaker",
     name: "ShaderMaker",
-    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化。",
+    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化；AI 可以直接写 GLSL 新增自定义 Shader。",
     whenToUse:
-      "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，或想看材质在不同环境光下的渲染结果时找我",
+      "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，或想看材质在不同环境光下的渲染结果，或想让 AI 写一个新的程序化材质 / Shader 效果时找我",
     version,
     entry: "main.js",
     icon: "assets/icon.png",
@@ -32,8 +32,7 @@ export function buildManifest(catalog, version) {
           properties: {
             material: {
               type: "string",
-              enum: catalog.materials.map((item) => item.id),
-              description: `材质预设，切换后材质参数重置为该预设。PBR 材质：${list(pbr)}。Shader 效果：${list(shader)}`,
+              description: `材质预设 id，切换后材质参数重置为该预设。PBR 材质：${list(pbr)}。Shader 效果：${list(shader)}。也可以是用 write_shader 写的自定义 Shader 的 id（read_shader 可列出）`,
             },
             render: { type: "string", enum: ["pbr", "npr"], description: "pbr=写实渲染，npr=卡通渲染（带描边）" },
             nprPreset: {
@@ -112,6 +111,59 @@ export function buildManifest(catalog, version) {
           properties: {
             max_size: { type: "integer", minimum: 256, maximum: 1280, description: "截图长边像素，默认 768" },
           },
+        },
+      },
+      {
+        name: "read_shader",
+        description:
+          "读取 ShaderMaker 的 Shader 写法说明和源码。不传 id：返回自定义 Shader 的写法说明（可用的 uniform、函数、规则）以及全部内置 / 自定义 Shader 列表——第一次写 Shader 前先调一次。传 id：返回该 Shader 的 GLSL 源码和预设参数，可以拿现成的效果当模板。只读，不改页面。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Shader 或材质预设的 id（例如 snow、stylizedBrick、ice、nebula）；传 library 返回可平铺函数库全部函数的签名和返回值说明；不传则返回写法说明和列表" },
+          },
+        },
+      },
+      {
+        name: "write_shader",
+        description:
+          "新建或修改一个自定义 Shader：提交 GLSL 代码，页面先编译检查。编译失败会返回带行号的错误，照着修改后再调用；通过后保存到这台电脑的浏览器存储，加入材质库「自定义」分组并（默认）立刻切换过去。写之前先用 read_shader 看写法说明。写完建议用 snapshot 看效果，再迭代。只改页面和本机浏览器存储，不写工作目录文件、不联网。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "英文 id，字母开头，2–40 位字母 / 数字 / _ / -；与已有自定义 Shader 同 id 时覆盖它，不能与内置 id 重名" },
+            name: { type: "string", description: "显示名称（中文即可），最多 40 字" },
+            kind: { type: "string", enum: ["surface", "vfx"], description: "surface=写实材质（写 SurfaceData sampleSurface(vec2 uv)），vfx=自发光特效（写完整 void main()）。默认 surface" },
+            code: { type: "string", description: "GLSL 代码，只写自己的函数，不要声明 uniform / varying / precision" },
+            timeScale: { type: "number", minimum: 0, maximum: 3, description: "速度 1 时的动画快慢倍率，静态材质可用 0.3，默认 0.3" },
+            params: {
+              type: "object",
+              additionalProperties: { type: "number" },
+              description: `预设的材质参数（键同 set_look 的 params），例如 uRoughness、uDisplace、uSss、uSnow、uEmissive：${ranges(catalog.params)}`,
+            },
+            colors: {
+              type: "object",
+              properties: {
+                uColorA: { type: "string", description: "暗部色 #rrggbb" },
+                uColorB: { type: "string", description: "主色 #rrggbb" },
+                uAccent: { type: "string", description: "高光 / 点缀色 #rrggbb" },
+              },
+              description: "预设三色（#rrggbb），Shader 里用 uColorA / uColorB / uAccent 读取",
+            },
+            apply: { type: "boolean", description: "通过后是否立刻切换到它，默认 true" },
+          },
+          required: ["id", "code"],
+        },
+      },
+      {
+        name: "delete_shader",
+        description: "删除一个自定义 Shader（只能删 write_shader 写的，内置的不能删）。会从这台电脑的浏览器存储和材质库里移除，不可撤销。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "要删除的自定义 Shader 的 id" },
+          },
+          required: ["id"],
         },
       },
     ],

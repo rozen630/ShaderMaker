@@ -105,6 +105,20 @@ async function handle(msg) {
       images: [{ data: base64 }],
     };
   }
+  if (msg.tool === 'write_shader') {
+    const written = await ask(page, 'writeShader', args, 30000);
+    // 编译失败按工具错误返回，错误信息带行号，AI 照着改了再调一次
+    if (!written.compiled) {
+      return { ok: false, errorCode: 'COMPILE_ERROR', message: 'GLSL 编译失败，修改后重新调用 write_shader：\n' + written.message };
+    }
+    return { ok: true, result: written };
+  }
+  if (msg.tool === 'read_shader') {
+    return { ok: true, result: await ask(page, 'readShader', args, 15000) };
+  }
+  if (msg.tool === 'delete_shader') {
+    return { ok: true, result: await ask(page, 'deleteShader', args, 15000) };
+  }
   return { ok: false, errorCode: 'UNKNOWN_TOOL', message: '未知的工具：' + msg.tool };
 }
 

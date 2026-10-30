@@ -53,7 +53,7 @@ function pbrPreset(name, category, values = {}) {
 }
 
 // Shader 预设：Surface 类请把 uMetalness / uRoughness 设为 1，让 ORM 贴图说了算（两者相乘）。
-function shaderPreset(shader, name, values = {}) {
+export function shaderPreset(shader, name, values = {}) {
   return {
     ...pbrBase,
     family: "shader",

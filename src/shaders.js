@@ -144,11 +144,13 @@ float bevel(float edgeDistance, float mortar, float width) {
 `;
 
 // options.tileable：带上可平铺库（新版 Shader 都用它，旧的保持原样）
-function makeSurfaceShader(name, definition, options = {}) {
+// source：只含这个 Shader 自己写的部分，AI 读源码（read_shader）时给它看
+export function makeSurfaceShader(name, definition, options = {}) {
   const source = common + (options.tileable ? tileable : "") + surfaceContract + definition;
   return {
     name,
     kind: "surface",
+    source: definition,
     fragment: source + /* glsl */ `
 void main() {
   SurfaceData surface = sampleSurface(vUv);
@@ -189,8 +191,8 @@ void main() {
 }
 
 // VFX：自发光特效，只输出 Base Color（也作为自发光贴图）
-function makeVfxShader(name, body) {
-  return { name, fragment: common + tileable + body };
+export function makeVfxShader(name, body) {
+  return { name, source: body, fragment: common + tileable + body };
 }
 
 export const shaders = {
@@ -1554,6 +1556,12 @@ const timeScales = {
   snowTracks: 0.3,
 };
 for (const [id, scale] of Object.entries(timeScales)) shaders[id].timeScale = scale;
+// 早期直接写 fragment 的 Shader：source 取 common 之后的部分，没有 kind 的都是 VFX
+for (const definition of Object.values(shaders)) {
+  if (definition.source === undefined) {
+    definition.source = definition.fragment.startsWith(common) ? definition.fragment.slice(common.length) : definition.fragment;
+  }
+}
 
 export const channelShaders = {
   orm: common + /* glsl */ `

@@ -210,6 +210,9 @@ npm run build:plugin      # → dist/cindy-plugin/
 | `set_look` | 精确设置材质、PBR / NPR、NPR 预设、滤镜与强度、作用范围、环境、展示模型、体素与精细度、材质参数、三色、NPR 参数，返回完整状态 |
 | `describe_look` | 一句话调整，等同于页面输入框（复用 `src/nl.js`） |
 | `snapshot` | 截取当前画面给 AI 看，方便它边调边检查 |
+| `read_shader` | 不传 id：自定义 Shader 写法说明 + 全部 Shader 列表；传 id：某个 Shader 的 GLSL 源码当模板；`library`：可平铺函数库的全部签名和返回值 |
+| `write_shader` | AI 直接写 GLSL 新建 / 修改自定义 Shader，先编译检查，失败返回带行号的错误，通过后加入「自定义」分组 |
+| `delete_shader` | 删除自定义 Shader（内置的不能删） |
 
 - 没有打开的 ShaderMaker 页面时，会自动在当前任务的右侧栏打开任务页（首次加载约 2 秒）。
 - 同一份页面有两个入口：主视图（`mainView`）和任务页（`taskView`）。可能同时开着好几份，后台按「当前任务的任务页 → 主视图 → 其它」选一份执行，不会重复执行。
@@ -220,6 +223,23 @@ npm run build:plugin      # → dist/cindy-plugin/
 
 ---
 
+## 🤖 AI 写 Shader
+
+在 Cindy 里说「帮我写一个会发光的六角装甲」，AI 会自己走完一轮：
+
+```
+read_shader（看写法）→ write_shader（提交 GLSL）→ 编译失败？按行号改了再交 → snapshot（看效果）→ 再调
+```
+
+- **两种写法**：`surface` 只写 `SurfaceData sampleSurface(vec2 uv)`，自动得到底色、ORM、法线、自发光、置换，写实 / 卡通 / 体素全支持；`vfx` 写完整的 `main()`，做自发光特效。
+- **编译检查**：底色、ORM、法线、自发光四个通道逐个编译，错误行号对应 AI 自己写的代码，不是拼接后的整段。
+- **存储**：存在这台电脑的浏览器存储（IndexedDB）里，主视图和任务页共用、实时同步，重开页面还在。**不跟着换电脑**，也不进 git。
+- **收进内置库**：好用的自定义 Shader，把代码和预设搬进 `src/shaders.js` / `src/presets.js`，提交后就随插件发布、所有电脑都有。
+
+材质库变大不用担心包体积：58 个 Shader 的源码只有约 66 KB（压缩后约 17 KB），插件包的大头是 4 张 HDR（8.3 MB 未压缩）和 Shader Ball 模型（2.4 MB）。实现见 `src/customShaders.js`。
+
+---
+
 ## 🗂️ 代码结构
 
 ```
@@ -227,6 +247,7 @@ src/
 ├── app.js           场景与界面；末尾导出给 Cindy 插件的 shaderMaker 控制接口
 ├── shaders.js       GLSL：公共噪声 / Voronoi、Surface 协议、58 个 Shader、timeScales
 ├── presets.js       PBR 材质库、Shader 预设、分类、滑条定义
+├── customShaders.js 自定义 Shader：写法说明、编译检查、IndexedDB 存储
 ├── materialFx.js    置换、积雪、SSS、冰下碎冰（PBR / NPR / 体素 + 描边 / 阴影 / 滤镜共用的顶点外推）
 ├── triplanar.js     三向投影、可平铺处理
 ├── npr.js           NPR 光照模型、描边、PBR → NPR 转换规则

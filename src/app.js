@@ -3,7 +3,19 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { vertexShader, shaders, channelShaders } from "./shaders.js";
-import { presets, pbrCategories, shaderCategories, sliderGroups, sliderDefs } from "./presets.js";
+import { presets, pbrCategories, shaderCategories, sliderGroups, sliderDefs, shaderPreset } from "./presets.js";
+import {
+  shaderGuide,
+  libraryReference,
+  customCategory,
+  checkShader,
+  formatErrors,
+  buildShader,
+  defaultValues,
+  loadCustomShaders,
+  saveCustomShader,
+  removeCustomShader,
+} from "./customShaders.js";
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 import { createStylizer, styles, defaultStyle, MASK_LAYER } from "./stylize.js";
@@ -1038,6 +1050,7 @@ const SHADER_OTHER = { id: "other", label: "其他" };
 const VFX_CATEGORY = { id: "vfx", label: "VFX · 自发光特效" };
 
 function shaderCategoryOf(id, preset) {
+  if (preset.custom) return customCategory.id;
   if ((shaders[preset.shader]?.kind || "vfx") !== "surface") return VFX_CATEGORY.id;
   return shaderCategories.find((category) => category.items.includes(id))?.id || SHADER_OTHER.id;
 }
@@ -1045,7 +1058,7 @@ function shaderCategoryOf(id, preset) {
 function libraryCategories() {
   return state.mode === "pbr"
     ? { list: pbrCategories, of: (id, preset) => preset.category, key: "pbrCategory" }
-    : { list: [...shaderCategories, SHADER_OTHER, VFX_CATEGORY], of: shaderCategoryOf, key: "shaderCategory" };
+    : { list: [customCategory, ...shaderCategories, SHADER_OTHER, VFX_CATEGORY], of: shaderCategoryOf, key: "shaderCategory" };
 }
 
 // Pro 模式的分类筛选（Lite 由 CSS 隐藏，并且始终显示全部）
@@ -1437,7 +1450,12 @@ function getState() {
   return {
     title: nameEl.textContent,
     tier: state.tier,
-    material: { id: state.preset, name: state.params.name || presets[state.preset]?.name || "", library: state.mode },
+    material: {
+      id: state.preset,
+      name: state.params.name || presets[state.preset]?.name || "",
+      library: state.mode,
+      custom: Boolean(presets[state.preset]?.custom),
+    },
     render: state.render,
     nprPreset: state.nprPreset,
     nprValues: state.render === "npr" ? Object.fromEntries(nprSliders.map((def) => [def.key, round(npr.values[def.key])])) : undefined,
@@ -1556,4 +1574,152 @@ function snapshot(maxSize = 768) {
   return { dataUrl: out.toDataURL("image/jpeg", 0.85), width: out.width, height: out.height, state: getState() };
 }
 
-export const shaderMaker = { getState, setLook, describeLook, snapshot };
+// ---- 自定义 Shader：AI 直接写 GLSL，编译通过后存进本机浏览器并加入材质库「自定义」分组 ----
+
+const builtinShaderIds = new Set(Object.keys(shaders));
+const customRecords = new Map();
+// 主视图和任务页可能同时开着：一边改了，通知另一边重新读取
+const libraryChannel = new BroadcastChannel("shadermaker-library");
+
+function registerCustomShader(record) {
+  shaders[record.id] = buildShader(record);
+  presets[record.id] = shaderPreset(record.id, record.name, { ...defaultValues(record.kind), ...record.values, custom: true });
+  thumbCache.delete(record.id);
+  customRecords.set(record.id, record);
+}
+
+function unregisterCustomShader(id) {
+  delete shaders[id];
+  delete presets[id];
+  thumbCache.delete(id);
+  customRecords.delete(id);
+}
+
+async function reloadCustomShaders() {
+  const records = await loadCustomShaders();
+  for (const id of [...customRecords.keys()]) if (!records.some((record) => record.id === id)) unregisterCustomShader(id);
+  for (const record of records) registerCustomShader(record);
+  if (!presets[state.preset]) setPreset("snow", presets.snow);
+  else if (customRecords.has(state.preset)) setPreset(state.preset, presets[state.preset]);
+  else {
+    renderPresets();
+    highlightPreset();
+  }
+}
+
+libraryChannel.addEventListener("message", () => reloadCustomShaders());
+reloadCustomShaders();
+
+function customSummary(record) {
+  return { id: record.id, name: record.name, kind: record.kind };
+}
+
+// 参数 / 颜色的校验和 setLook 一致：未知或无效的进 warnings
+function readValues(input, base, warnings) {
+  const values = { ...base };
+  for (const [key, value] of Object.entries(input.params || {})) {
+    const def = sliderDefs.find((item) => item.key === key);
+    if (!def || !Number.isFinite(Number(value))) {
+      warnings.push(`未知的材质参数：${key}`);
+      continue;
+    }
+    values[key] = THREE.MathUtils.clamp(Number(value), def.min, def.max);
+  }
+  for (const [key, value] of Object.entries(input.colors || {})) {
+    const rgb = colorKeys.includes(key) ? hexToRgb(value) : null;
+    if (!rgb) {
+      warnings.push(`无效的颜色：${key}=${value}`);
+      continue;
+    }
+    values[key] = rgb;
+  }
+  return values;
+}
+
+async function writeShader(input = {}) {
+  const id = String(input.id || "").trim();
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]{1,39}$/.test(id)) throw new Error("id 要以英文字母开头，2–40 位字母、数字、_ 或 -");
+  if (builtinShaderIds.has(id) || (presets[id] && !presets[id].custom)) throw new Error(`「${id}」是内置材质的 id，请换一个`);
+  const code = String(input.code || "");
+  if (!code.trim()) throw new Error("code 不能为空");
+  if (code.length > 60000) throw new Error("代码太长（上限 60000 字符）");
+  const existing = customRecords.get(id);
+  const kind = input.kind === "vfx" ? "vfx" : input.kind === "surface" ? "surface" : existing?.kind || "surface";
+  const warnings = [];
+  const record = {
+    id,
+    name: String(input.name || existing?.name || id).trim().slice(0, 40),
+    kind,
+    code,
+    timeScale: THREE.MathUtils.clamp(Number(input.timeScale ?? existing?.timeScale ?? 0.3) || 0, 0, 3),
+    values: readValues(input, existing?.kind === kind ? existing.values : {}, warnings),
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+  };
+  const errors = checkShader(renderer, buildShader(record), thumbUniforms);
+  if (errors.length) return { compiled: false, errors, message: formatErrors(errors, code) };
+  await saveCustomShader(record);
+  registerCustomShader(record);
+  libraryChannel.postMessage({ type: "changed", id });
+  if (input.apply !== false) setPreset(id, presets[id]);
+  else {
+    renderPresets();
+    highlightPreset();
+  }
+  logEl.textContent = `${existing ? "已更新" : "已新增"}自定义 Shader：${record.name}`;
+  return { compiled: true, created: !existing, shader: customSummary(record), warnings, state: getState() };
+}
+
+function readShader(input = {}) {
+  const id = String(input.id || "").trim();
+  if (id === "library") return { id, reference: libraryReference() };
+  if (!id) {
+    return {
+      guide: shaderGuide,
+      builtin: Object.entries(shaders)
+        .filter(([key]) => builtinShaderIds.has(key) && key !== "lookdev")
+        .map(([key, def]) => ({ id: key, name: def.name, kind: def.kind || "vfx" })),
+      custom: [...customRecords.values()].map(customSummary),
+    };
+  }
+  const shaderId = shaders[id] ? id : presets[id]?.shader;
+  const definition = shaders[shaderId];
+  if (!definition) throw new Error(`没有这个 Shader：${id}`);
+  const presetId = presets[id] ? id : Object.keys(presets).find((key) => presets[key].shader === shaderId);
+  const preset = presets[presetId] || {};
+  return {
+    id: shaderId,
+    name: definition.name,
+    kind: definition.kind || "vfx",
+    custom: Boolean(definition.custom),
+    timeScale: definition.timeScale ?? 1,
+    // 内置的 Surface Shader 有的没带可平铺库（旧写法），自定义 Shader 一律带
+    code: definition.source,
+    preset: presetId
+      ? {
+          id: presetId,
+          name: preset.name,
+          colors: Object.fromEntries(colorKeys.map((key) => [key, rgbToHex(preset[key] || [0, 0, 0])])),
+          params: Object.fromEntries(sliderDefs.filter((def) => preset[def.key] !== undefined).map((def) => [def.key, round(preset[def.key])])),
+        }
+      : undefined,
+  };
+}
+
+async function deleteShader(input = {}) {
+  const id = String(input.id || "").trim();
+  if (!customRecords.has(id)) throw new Error(builtinShaderIds.has(id) ? "内置 Shader 不能删除" : `没有这个自定义 Shader：${id}`);
+  const name = customRecords.get(id).name;
+  await removeCustomShader(id);
+  unregisterCustomShader(id);
+  libraryChannel.postMessage({ type: "changed", id });
+  if (state.preset === id) setPreset("snow", presets.snow);
+  else {
+    renderPresets();
+    highlightPreset();
+  }
+  logEl.textContent = `已删除自定义 Shader：${name}`;
+  return { deleted: id, custom: [...customRecords.values()].map(customSummary), state: getState() };
+}
+
+export const shaderMaker = { getState, setLook, describeLook, snapshot, writeShader, readShader, deleteShader };

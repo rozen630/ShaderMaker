@@ -12,6 +12,9 @@ const handlers = {
   set: (payload) => shaderMaker.setLook(payload),
   describe: (payload) => shaderMaker.describeLook(String(payload.text || "")),
   snapshot: (payload) => shaderMaker.snapshot(payload.maxSize),
+  writeShader: (payload) => shaderMaker.writeShader(payload),
+  readShader: (payload) => shaderMaker.readShader(payload),
+  deleteShader: (payload) => shaderMaker.deleteShader(payload),
 };
 
 channel.addEventListener("message", async ({ data }) => {

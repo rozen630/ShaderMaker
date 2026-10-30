@@ -172,6 +172,17 @@ export function interpretPrompt(raw, state) {
       break;
     }
   }
+  // 自定义 Shader（AI 写的）按名字匹配
+  if (presetId === (state.preset || state.shader)) {
+    for (const [id, preset] of Object.entries(presets)) {
+      if (!preset.custom || !preset.name || !text.includes(preset.name.toLowerCase())) continue;
+      presetId = id;
+      shader = preset.shader;
+      Object.assign(next, preset);
+      notes.push(`切换到 ${preset.name}`);
+      break;
+    }
+  }
 
   const colors = findColors(text);
   if (colors.length >= 2) {

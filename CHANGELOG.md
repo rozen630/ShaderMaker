@@ -4,6 +4,17 @@
 
 ---
 
+## 🤖 未发布 · AI 写 Shader
+
+- 新增 AI 工具 `read_shader` / `write_shader` / `delete_shader`：AI 可以直接写 GLSL 新增或修改 Shader。
+- 提交时逐个通道编译检查，失败返回对应 AI 代码行号的错误，方便它改了再交。
+- 通过后存进本机浏览器（IndexedDB），加入材质库「自定义」分组；主视图和任务页实时同步。
+- 自定义 Shader 和内置的一样支持写实 / 卡通 / 体素、置换、积雪、滤镜；页面输入框按名字也能切换过去。
+- `read_shader` 可以读任何内置 Shader 的源码当模板，`id="library"` 返回可平铺函数库的全部签名和返回值。
+- `set_look` 的 `material` 不再限定内置 id，也能切到自定义 Shader。
+
+---
+
 ## 🌌 1.5.0 · 一个材质，三个世界
 <sub>2026-10-30 · 标签 `v1.5.0`</sub>
 
