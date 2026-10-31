@@ -5,7 +5,7 @@
 **一个材质，三个世界。**
 写实 PBR · 卡通 NPR · Teardown 式体素——同一份程序材质，一键切换，积雪、置换、次表面散射全程跟随。
 
-![version](https://img.shields.io/badge/version-1.6.0-7c5cff?style=flat-square)
+![version](https://img.shields.io/badge/version-1.7.0-7c5cff?style=flat-square)
 ![three.js](https://img.shields.io/badge/three.js-r170-000000?style=flat-square&logo=three.js)
 ![shaders](https://img.shields.io/badge/shaders-58-ff6b9d?style=flat-square)
 ![pbr](https://img.shields.io/badge/PBR%20materials-26-38bdf8?style=flat-square)
