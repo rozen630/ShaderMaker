@@ -1,8 +1,10 @@
-// HDR 来自 Poly Haven（CC0）。背景直接显示环境，所以网页版用 2k，1k 放大后会糊。
-// Cindy 插件页面不能联网、整包又限 8 MB，打包时用 esbuild define 换成包内的 1k 文件（见 cindy-plugin/build.mjs）
+// HDR 来自 Poly Haven（CC0）。背景直接显示环境，所以用 2k，1k 放大后会糊。
+// Cindy 插件页面不能联网、整包又限 8 MB，打包时用 esbuild define 换成包内压缩过的版本
+// （底图 JPEG + 增益 PNG，扩展名 .jpg，由 src/packedHdr.js 还原；见 cindy-plugin/build.mjs）
 const HDR_BASE = typeof __SHADERMAKER_HDR_BASE__ === "string" ? __SHADERMAKER_HDR_BASE__ : "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr";
 const HDR_RES = typeof __SHADERMAKER_HDR_RES__ === "string" ? __SHADERMAKER_HDR_RES__ : "2k";
-const polyHaven = (name) => `${HDR_BASE}/${HDR_RES}/${name}_${HDR_RES}.hdr`;
+const HDR_EXT = typeof __SHADERMAKER_HDR_EXT__ === "string" ? __SHADERMAKER_HDR_EXT__ : "hdr";
+const polyHaven = (name) => `${HDR_BASE}/${HDR_RES}/${name}_${HDR_RES}.${HDR_EXT}`;
 
 export const environments = {
   studio: {

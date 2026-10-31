@@ -180,12 +180,38 @@ function normalize(object, height) {
   return root;
 }
 
+// 插件包里的模型做过顶点量化（cindy-plugin/modelPack.mjs）：属性转回浮点，量化用的节点缩放 / 平移烘回网格，
+// 之后的细分、体素化、描边法线都和原始模型一样处理。网页版加载的是原始模型，什么都不做。
+function dequantize(mesh) {
+  const geometry = mesh.geometry;
+  let quantized = false;
+  for (const [name, attribute] of Object.entries(geometry.attributes)) {
+    if (!attribute.isInterleavedBufferAttribute && attribute.array instanceof Float32Array) continue;
+    quantized = true;
+    const size = attribute.itemSize;
+    const array = new Float32Array(attribute.count * size);
+    const read = [attribute.getX, attribute.getY, attribute.getZ, attribute.getW];
+    for (let i = 0; i < attribute.count; i += 1) {
+      for (let k = 0; k < size; k += 1) array[i * size + k] = read[k].call(attribute, i);
+    }
+    geometry.setAttribute(name, new THREE.BufferAttribute(array, size));
+  }
+  if (!quantized) return;
+  mesh.updateMatrix();
+  geometry.applyMatrix4(mesh.matrix);
+  geometry.normalizeNormals();
+  mesh.position.set(0, 0, 0);
+  mesh.quaternion.identity();
+  mesh.scale.set(1, 1, 1);
+}
+
 async function buildShaderBall(def) {
   const gltf = await new GLTFLoader().loadAsync(def.url);
   const materialMeshes = [];
   const neutralMeshes = [];
   gltf.scene.traverse((child) => {
     if (!child.isMesh) return;
+    dequantize(child);
     if (child.name.startsWith("Calibration")) {
       child.userData.pbrMaterial = calibrationMaterial;
       neutralMeshes.push(child);

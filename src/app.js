@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+import { loadPackedHdr } from "./packedHdr.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { vertexShader, shaders, channelShaders } from "./shaders.js";
 import { presets, pbrCategories, shaderCategories, sliderGroups, sliderDefs, shaderPreset } from "./presets.js";
@@ -441,7 +442,9 @@ function applyLight(light, spec) {
 
 async function loadEnvironmentMap(url) {
   if (envCache.has(url)) return envCache.get(url);
-  const pending = hdrLoader.loadAsync(url).then((texture) => {
+  // .jpg 是插件包里压缩过的 HDR（src/packedHdr.js），.hdr 是 Poly Haven 原文件
+  const load = url.endsWith(".jpg") ? loadPackedHdr(url) : hdrLoader.loadAsync(url);
+  const pending = load.then((texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     const envMap = pmrem.fromEquirectangular(texture).texture;
     texture.dispose();

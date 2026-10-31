@@ -218,7 +218,9 @@ npm run build:plugin      # → dist/cindy-plugin/
 - 同一份页面有两个入口：主视图（`mainView`）和任务页（`taskView`）。可能同时开着好几份，后台按「当前任务的任务页 → 主视图 → 其它」选一份执行，不会重复执行。
 - **打包时的改动**（插件页面 CSP 只允许包内脚本，且不能联网）：
   - esbuild 把 `src/` 与 three.js 打成一个 `app.js`，替代 importmap（内联脚本会被 CSP 拦截）。
-  - HDR 打进包里。整包限 8 MB，所以插件版用 1k HDR（缓存在 `.cache/hdr/`），网页版仍用 2k。
+  - HDR 打进包里，压缩成「底图 JPEG + 增益 PNG」（`cindy-plugin/hdrPack.mjs`），页面加载时还原成 HDR（`src/packedHdr.js`）。2k 的 4 张只有约 3.7 MB，比原来 1k 的 `.hdr` 还小，亮部（太阳、路灯）的颜色和能量误差控制在 2.5% 以内；网页版仍直接加载 Poly Haven 的 `.hdr`。
+  - 展示模型做顶点量化（`cindy-plugin/modelPack.mjs`，three.js 原生支持，不需要解码器），压缩后从 1.36 MB 减到 0.9 MB。
+  - 整包约 4.9 MB（原来 6.8 MB，上限 8 MB）。
   - `ghost.json` 由 `cindy-plugin/manifest.mjs` 生成，工具参数的可选项读自现有数据，新增材质、滤镜、环境不用改插件代码。
 
 ---
@@ -268,6 +270,6 @@ cindy-plugin/        page.js（页面入口）· main.js（插件后台）· man
 
 ## 🙏 第三方资源
 
-- `assets/models/materialx-shaderball.glb`：MaterialX Viewer 的默认 Shader Ball，来自 [AcademySoftwareFoundation/MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX/tree/main/resources/Geometry)，Apache License 2.0，授权原文见 `assets/models/MATERIALX-LICENSE.txt`。内芯色环由 ShaderMaker 程序生成，不是原始资源的一部分。
+- `assets/models/materialx-shaderball.glb`：MaterialX Viewer 的默认 Shader Ball，来自 [AcademySoftwareFoundation/MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX/tree/main/resources/Geometry)，Apache License 2.0，授权原文见 `assets/models/MATERIALX-LICENSE.txt`。内芯色环由 ShaderMaker 程序生成，不是原始资源的一部分；插件版的模型做了顶点量化。
 - `src/vendor/tileable-shaders.js`：[tuxalin/procedural-tileable-shaders](https://github.com/tuxalin/procedural-tileable-shaders)（MIT，授权原文见 `src/vendor/TILEABLE-SHADERS-LICENSE.txt`）。新版 Shader 用到其中的可平铺噪声、Voronoi、裂纹、六边形、编织、Domain Warping。原库有几处类型错误编译不过，做了最小修补，改动处标了「ShaderMaker」。
-- HDR 环境：[Poly Haven](https://polyhaven.com/hdris)（CC0）。网页版运行时从 Poly Haven CDN 加载 2k 版本，Cindy 插件版把 1k 版本打进包里。
+- HDR 环境：[Poly Haven](https://polyhaven.com/hdris)（CC0）。网页版运行时从 Poly Haven CDN 加载 2k 版本，Cindy 插件版把 2k 版本压缩后打进包里。

@@ -2,12 +2,15 @@
 //
 // 插件页面的 CSP 只允许包内脚本、且不能联网，所以这里：
 //   1. 用 esbuild 把 src/ 和 three.js 打成一个 app.js（页面里的 importmap 是内联脚本，会被 CSP 拦掉）；
-//   2. 把 HDR 下载到 .cache/hdr/ 后放进包里，页面改从包内读取（整包限 8 MB，所以用 1k）；
-//   3. 从现有数据生成 ghost.json（工具参数枚举跟着材质 / 滤镜 / 环境数据走）。
+//   2. 把 HDR 下载到 .cache/hdr/，压缩成「底图 JPEG + 增益 PNG」放进包里（hdrPack.mjs），页面改从包内读取并还原；
+//   3. 展示模型做顶点量化（modelPack.mjs）；
+//   4. 从现有数据生成 ghost.json（工具参数枚举跟着材质 / 滤镜 / 环境数据走）。
 //
 // 用法：npm install && npm run build:plugin
 import { build } from "esbuild";
-import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { packHdr } from "./hdrPack.mjs";
+import { packModel } from "./modelPack.mjs";
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildManifest } from "./manifest.mjs";
@@ -16,7 +19,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const pluginDir = join(root, "cindy-plugin");
 const out = join(root, "dist", "cindy-plugin");
 const cacheDir = join(root, ".cache", "hdr");
-const HDR_RES = "1k";
+// HDR 用 2k 压缩版（hdrPack.mjs：底图 JPEG + 增益 PNG），4 张约 2.6 MB，比原来 1k 的 .hdr（约 5 MB）还小
+const HDR_RES = "2k";
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 
 async function exists(path) {
@@ -66,6 +70,7 @@ await build({
   define: {
     __SHADERMAKER_HDR_BASE__: JSON.stringify("./assets/hdr"),
     __SHADERMAKER_HDR_RES__: JSON.stringify(HDR_RES),
+    __SHADERMAKER_HDR_EXT__: JSON.stringify("jpg"),
   },
   logLevel: "warning",
 });
@@ -73,12 +78,17 @@ await build({
 for (const env of catalog.environments) {
   // catalog 里是网页版的 2k 地址，换成插件用的分辨率
   const url = env.hdr.replaceAll("2k", HDR_RES);
-  await cp(await downloadHdr(url), join(out, "assets", "hdr", HDR_RES, basename(url)));
+  const name = basename(url).replace(/\.hdr$/, "");
+  await packHdr(await downloadHdr(url), join(out, "assets", "hdr", HDR_RES, name));
 }
 
 await writeFile(join(out, "main-view.html"), pluginHtml(await readFile(join(root, "index.html"), "utf8")));
 await cp(join(root, "styles.css"), join(out, "styles.css"));
 await cp(join(root, "assets", "models"), join(out, "assets", "models"), { recursive: true });
+// 模型顶点量化，体积约减 40%（modelPack.mjs）
+for (const file of await readdir(join(out, "assets", "models"))) {
+  if (file.endsWith(".glb")) await packModel(join(root, "assets", "models", file), join(out, "assets", "models", file));
+}
 await cp(join(pluginDir, "assets", "icon.png"), join(out, "assets", "icon.png"));
 await cp(join(pluginDir, "main.js"), join(out, "main.js"));
 await writeFile(join(out, "ghost.json"), `${JSON.stringify(buildManifest(catalog, pkg.version), null, 2)}\n`);
