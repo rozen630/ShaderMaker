@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { makeSurfaceShader, makeVfxShader, vertexShader } from "./shaders.js";
 import { tileableGlsl } from "./vendor/tileable-shaders.js";
+import { loadAll, saveRecord, removeRecord } from "./store.js";
 
 export const USER_CODE_MARKER = "// @user-code";
 export const customCategory = { id: "custom", label: "自定义" };
@@ -155,42 +156,8 @@ export function defaultValues(kind) {
   return { ...colors, uSpeed: 1, uScale: 1, uWarp: 0.3, uSeed: 1, uMetalness: 1, uRoughness: 1, uNormal: 1, uDisplace: 0.015 };
 }
 
-// ---- 存储（IndexedDB，主视图和任务页同源共用） ----
+// ---- 存储（src/store.js，IndexedDB） ----
 
-const DB_NAME = "shadermaker";
-const STORE = "customShaders";
-
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "id" });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function withStore(mode, run) {
-  const db = await openDb();
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, mode);
-      const request = run(tx.objectStore(STORE));
-      tx.oncomplete = () => resolve(request?.result);
-      tx.onerror = () => reject(tx.error);
-    });
-  } finally {
-    db.close();
-  }
-}
-
-export async function loadCustomShaders() {
-  try {
-    const records = await withStore("readonly", (store) => store.getAll());
-    return (records || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-  } catch {
-    return [];
-  }
-}
-
-export const saveCustomShader = (record) => withStore("readwrite", (store) => store.put(record));
-export const removeCustomShader = (id) => withStore("readwrite", (store) => store.delete(id));
+export const loadCustomShaders = () => loadAll("customShaders");
+export const saveCustomShader = (record) => saveRecord("customShaders", record);
+export const removeCustomShader = (id) => removeRecord("customShaders", id);

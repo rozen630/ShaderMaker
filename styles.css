@@ -955,3 +955,32 @@ input[type="range"]::-moz-range-thumb {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   }
 }
+
+/* 效果：参数里的取色器 */
+.effect-controls {
+  margin-top: 12px;
+}
+
+.effect-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.slider input.effect-color {
+  width: 30px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.slider input.effect-color::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.slider input.effect-color::-webkit-color-swatch {
+  border: 0;
+  border-radius: 4px;
+}

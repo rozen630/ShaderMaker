@@ -15,6 +15,9 @@ const handlers = {
   writeShader: (payload) => shaderMaker.writeShader(payload),
   readShader: (payload) => shaderMaker.readShader(payload),
   deleteShader: (payload) => shaderMaker.deleteShader(payload),
+  writeEffect: (payload) => shaderMaker.writeEffect(payload),
+  readEffect: (payload) => shaderMaker.readEffect(payload),
+  deleteEffect: (payload) => shaderMaker.deleteEffect(payload),
 };
 
 channel.addEventListener("message", async ({ data }) => {

@@ -119,6 +119,19 @@ async function handle(msg) {
   if (msg.tool === 'delete_shader') {
     return { ok: true, result: await ask(page, 'deleteShader', args, 15000) };
   }
+  if (msg.tool === 'write_effect') {
+    const written = await ask(page, 'writeEffect', args, 60000);
+    if (!written.compiled) {
+      return { ok: false, errorCode: 'COMPILE_ERROR', message: '效果编译失败，修改后重新调用 write_effect：\n' + written.message };
+    }
+    return { ok: true, result: written };
+  }
+  if (msg.tool === 'read_effect') {
+    return { ok: true, result: await ask(page, 'readEffect', args, 15000) };
+  }
+  if (msg.tool === 'delete_effect') {
+    return { ok: true, result: await ask(page, 'deleteEffect', args, 15000) };
+  }
   return { ok: false, errorCode: 'UNKNOWN_TOOL', message: '未知的工具：' + msg.tool };
 }
 

@@ -12,6 +12,7 @@
 // 顶点外推的部分（fxVertex）还要打在描边外壳、阴影、滤镜的遮罩 / 法线深度上（applyFxVertex），形状才一致。
 import * as THREE from "three";
 import { triplanarUniforms } from "./triplanar.js";
+import { injectEffect, registerEffectMaterial, effectVersion } from "./effects.js";
 
 export const materialFxUniforms = {
   uSss: { value: 0 },
@@ -145,7 +146,8 @@ vFxVoxelEye = vec3(0.0, 0.0, -1.0);
 }
 `;
 
-const vertexDisplace = `#include <begin_vertex>\n${vertexBody}`;
+// @effect-deform：effects.js 在这里接上当前效果的顶点形变（主体之外的描边 / 阴影 / 滤镜材质也一样）
+const vertexDisplace = `#include <begin_vertex>\n${vertexBody}\n// @effect-deform\n`;
 
 // 给不是主体材质的材质（描边外壳、阴影深度、滤镜遮罩、法线深度、通道查看）也打上同样的外推；
 // declareTri：着色器里还没有 uTriDisplayInverse 时由这里声明
@@ -159,10 +161,12 @@ export function applyFxVertex(material, { declareTri = true } = {}) {
     previous.call(material, shader, renderer);
     shader.vertexShader = shader.vertexShader.replace(
       "void main() {",
-      `${declareTri ? "uniform mat4 uTriDisplayInverse;\n" : ""}${vertexDecl}\nvoid main() {`
+      `${declareTri ? "uniform mat4 uTriDisplayInverse;\n" : ""}${vertexDecl}\n// @effect-vertex-head\nvoid main() {`
     );
+    injectEffect(shader);
   };
-  material.customProgramCacheKey = () => `${previousKey.call(material)}-fxv-1`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}-fxv-1-e${effectVersion()}`;
+  registerEffectMaterial(material, "vertex");
   material.needsUpdate = true;
 }
 
@@ -241,6 +245,7 @@ if (uIceLayers > 0.001) {
   vec3 below = iceLayers(iceBase, iceEye, iceFacing);
   diffuseColor.rgb = mix(mix(diffuseColor.rgb, below, uIceLayers), diffuseColor.rgb, surfaceMask);
 }
+// @effect-overlay
 float fxSnow = snowMask();
 vec3 fxSnowGrain = vTriInstanced > 0.5 ? vFxVoxelCenter : vTriPos;
 diffuseColor.rgb = mix(diffuseColor.rgb, uSnowColor * (0.9 + 0.1 * fxNoise(fxSnowGrain * 40.0)), fxSnow);
@@ -354,12 +359,15 @@ export function applyMaterialFx(material, { toon = false } = {}) {
       .replace("#include <metalnessmap_fragment>", afterMetalness)
       .replace("#include <emissivemap_fragment>", toon ? afterEmissiveToon : "#include <emissivemap_fragment>")
       .replace("#include <normal_fragment_maps>", afterNormal)
-      .replace("#include <lights_fragment_end>", toon ? afterLightsToon : afterLights);
+      .replace("#include <lights_fragment_end>", `${toon ? afterLightsToon : afterLights}\n// @effect-emissive\n`);
     previous.call(material, shader, renderer);
     // 放在 main 前面（triplanar 的 uniform / varying 声明之后）
-    shader.vertexShader = shader.vertexShader.replace("void main() {", `${vertexDecl}\nvoid main() {`);
-    shader.fragmentShader = shader.fragmentShader.replace("void main() {", `${fragmentHead}\nvoid main() {`);
+    shader.vertexShader = shader.vertexShader.replace("void main() {", `${vertexDecl}\n// @effect-vertex-head\nvoid main() {`);
+    shader.fragmentShader = shader.fragmentShader.replace("void main() {", `${fragmentHead}\n// @effect-fragment-head\nvoid main() {`);
+    // 当前效果（effects.js）：表面 overlay、自发光、顶点形变和法线重算
+    injectEffect(shader, { subject: true });
   };
-  material.customProgramCacheKey = () => `${previousKey.call(material)}-fx-4${toon ? "-toon" : ""}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}-fx-4${toon ? "-toon" : ""}-e${effectVersion()}`;
+  registerEffectMaterial(material, "subject");
   material.needsUpdate = true;
 }

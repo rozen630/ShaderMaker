@@ -33,6 +33,21 @@ import {
   triplanarFragmentHead,
 } from "./triplanar.js";
 import { applyMaterialFx, applyFxVertex, materialFxUniforms } from "./materialFx.js";
+import {
+  effectInputs,
+  effectGuide,
+  effectUses,
+  setActiveEffect,
+  activeEffect,
+  effectParamValue,
+  setEffectParam,
+  createInstanceLayer,
+  normalizeEffect,
+  checkEffect,
+  formatEffectErrors,
+} from "./effects.js";
+import { effectExamples } from "./effectExamples.js";
+import { loadAll, saveRecord, removeRecord } from "./store.js";
 
 const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
@@ -298,6 +313,10 @@ applyMaterialFx(nprSubjectMaterial, { toon: true });
 // 阴影也要跟着积雪 / 置换推出去，否则影子还是原来的形状
 const displacedDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
 applyFxVertex(displacedDepthMaterial);
+// 效果的实例层（effects.js）：挂在 display 组下，坐标就是展示空间；也进主体遮罩，「仅模型」滤镜会处理它
+const instanceLayer = createInstanceLayer(npr);
+display.add(instanceLayer.mesh);
+instanceLayer.mesh.layers.enable(MASK_LAYER);
 const voxelNeutralMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0 });
 applyVoxelSupport(voxelNeutralMaterial);
 let voxelGroup = null;
@@ -321,6 +340,8 @@ const state = {
   shaderCategory: "all",
   // 进来默认是雪地：积雪带置换，一打开就能看到曲面细分后的起伏（Lookdev 色卡球留在材质库「校准」里）
   preset: "snow",
+  // 当前效果 id（effects.js），null = 没有
+  effect: null,
   shader: "snow",
   environment: defaultEnvironment,
   style: defaultStyle,
@@ -674,6 +695,9 @@ function refreshRenderState() {
   const debug = state.channel !== "final";
   const subjectMaterial = debug ? channelMaterial : nprOn ? nprSubjectMaterial : cubeMaterial;
   for (const mesh of displayParts.materialMeshes) mesh.material = subjectMaterial;
+  instanceLayer.setRender(nprOn);
+  // 体素化时实例根部埋在方块里、通道查看只看贴图，都不画实例（overlay 照常）
+  instanceLayer.setHidden(debug || state.voxelOn);
   // 校色件（内芯色环、灰底盘）是参照物，任何模式下都保持写实
   for (const mesh of displayParts.neutralMeshes) mesh.material = mesh.userData.pbrMaterial;
   for (const mesh of voxelGroup?.children || []) {
@@ -788,6 +812,227 @@ function initVoxelControls() {
   syncVoxelControls();
 }
 
+// ---- 效果（effects.js）：输入、效果库、面板 ----
+
+const effectRoot = document.getElementById("effects");
+const effectControls = document.getElementById("effect-controls");
+const effectHint = document.getElementById("effect-hint");
+const builtinEffects = new Map(Object.values(effectExamples).map((record) => [record.id, normalizeEffect(record)]));
+for (const [id, record] of builtinEffects) record.keys = effectExamples[id].keys || [];
+const customEffects = new Map();
+const effectChannel = new BroadcastChannel("shadermaker-effects");
+// 每个效果调过的参数值（切走再切回来时保留）
+const effectValues = new Map();
+const input = { clicks: [], frozenAge: null, pointerDirty: false, pointerEvent: null };
+
+function allEffects() {
+  return [...builtinEffects.values(), ...customEffects.values()];
+}
+
+function findEffect(id) {
+  return customEffects.get(id) || builtinEffects.get(id) || null;
+}
+
+function updateModelInputs(meshes) {
+  const box = new THREE.Box3();
+  display.updateMatrixWorld(true);
+  const inverse = new THREE.Matrix4().copy(display.matrixWorld).invert();
+  for (const mesh of meshes) {
+    mesh.geometry.computeBoundingBox();
+    box.union(mesh.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld)));
+  }
+  box.getCenter(effectInputs.uModelCenter.value);
+  effectInputs.uModelSize.value = box.getSize(new THREE.Vector3()).length();
+}
+
+// 屏幕坐标（NDC）→ 模型表面上的点（展示空间）；没打到返回 null
+const surfaceRaycaster = new THREE.Raycaster();
+function pickSurface(ndcX, ndcY) {
+  surfaceRaycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  const hit = surfaceRaycaster.intersectObjects(displayParts.materialMeshes, false)[0];
+  return hit ? display.worldToLocal(hit.point.clone()) : null;
+}
+
+// 记一次点击：uClickPos / uClickAge / uClickCount，上一次的进 uPrev*
+function pushClick(point) {
+  input.clicks.unshift({ point: point.clone(), time: clock.getElapsedTime() });
+  input.clicks.length = Math.min(input.clicks.length, 2);
+  effectInputs.uClickCount.value += 1;
+  input.frozenAge = null;
+}
+
+// 没有指定位置时：画面正中对着的那一点，正中没有模型就取模型顶部
+function defaultClickPoint() {
+  const hit = pickSurface(0, 0);
+  if (hit) return hit;
+  const center = effectInputs.uModelCenter.value;
+  return new THREE.Vector3(center.x, center.y + effectInputs.uModelSize.value * 0.3, center.z);
+}
+
+function updateEffectInputs(elapsed) {
+  effectInputs.uTime.value = elapsed;
+  const [last, previous] = input.clicks;
+  if (last) {
+    effectInputs.uClickPos.value.copy(last.point);
+    effectInputs.uClickAge.value = input.frozenAge ?? elapsed - last.time;
+  } else effectInputs.uClickAge.value = 1e4;
+  if (previous) {
+    effectInputs.uPrevClickPos.value.copy(previous.point);
+    effectInputs.uPrevClickAge.value = elapsed - previous.time;
+  } else effectInputs.uPrevClickAge.value = 1e4;
+  // 指针：只有效果用到 uPointer 时才每帧拾取，鼠标没动就不重算
+  if (input.pointerDirty && input.pointerEvent && effectUses(activeEffect(), "uPointerPos")) {
+    input.pointerDirty = false;
+    const rect = canvas.getBoundingClientRect();
+    const event = input.pointerEvent;
+    const point = pickSurface(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    effectInputs.uPointerOn.value = point ? 1 : 0;
+    if (point) effectInputs.uPointerPos.value.copy(point);
+  }
+}
+
+function initEffectInput() {
+  let down = null;
+  canvas.addEventListener("pointerdown", (event) => {
+    down = { x: event.clientX, y: event.clientY, time: performance.now() };
+  });
+  // 点击（不是拖动视角）模型：记一次点击
+  canvas.addEventListener("pointerup", (event) => {
+    if (!down) return;
+    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
+    const quick = performance.now() - down.time < 400;
+    down = null;
+    if (moved > 5 || !quick || !activeEffect()) return;
+    const rect = canvas.getBoundingClientRect();
+    const point = pickSurface(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    if (point) pushClick(point);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    input.pointerEvent = event;
+    input.pointerDirty = true;
+  });
+  canvas.addEventListener("pointerleave", () => {
+    input.pointerEvent = null;
+    effectInputs.uPointerOn.value = 0;
+  });
+}
+
+// 切换当前效果（null = 关闭）
+function activateEffect(id) {
+  const record = id ? findEffect(id) : null;
+  setActiveEffect(record, record ? effectValues.get(record.id) || {} : {});
+  state.effect = record?.id || null;
+  renderEffects();
+  return record;
+}
+
+function renderEffects() {
+  if (!effectRoot) return;
+  effectRoot.innerHTML = "";
+  for (const record of [{ id: null, name: "无" }, ...allEffects()]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chip";
+    button.textContent = record.name;
+    if (record.description) button.title = record.description;
+    button.classList.toggle("active", (state.effect || null) === record.id);
+    button.addEventListener("click", () => {
+      activateEffect(record.id);
+      logEl.textContent = record.id ? `效果：${record.name}` : "关闭效果";
+    });
+    effectRoot.append(button);
+  }
+  renderEffectControls();
+}
+
+function renderEffectControls() {
+  if (!effectControls) return;
+  effectControls.innerHTML = "";
+  const record = activeEffect();
+  effectControls.hidden = !record;
+  if (!record) return;
+  if (effectHint) {
+    const usesClick = effectUses(record, "uClickPos") || effectUses(record, "uClickAge");
+    effectHint.textContent = usesClick ? "点击模型触发" : effectUses(record, "uPointerPos") ? "鼠标移到模型上" : record.description || "";
+  }
+  for (const def of record.params) {
+    const wrap = document.createElement("div");
+    wrap.className = def.lite ? "slider" : "slider pro-only";
+    if (def.type === "color") {
+      wrap.innerHTML = `<label><b>${def.label}</b><input type="color" /></label>`;
+      const picker = wrap.querySelector("input");
+      picker.className = "effect-color";
+      picker.value = effectParamValue(def.key);
+      picker.addEventListener("input", () => {
+        setEffectParam(def.key, picker.value);
+        rememberEffectValue(def.key, picker.value);
+      });
+    } else {
+      const digits = def.max - def.min >= 10 ? 1 : def.max - def.min >= 1 ? 2 : 3;
+      wrap.innerHTML = `
+        <label><b>${def.label}</b><span></span></label>
+        <input type="range" min="${def.min}" max="${def.max}" step="${(def.max - def.min) / 200}" />`;
+      const range = wrap.querySelector("input");
+      const value = wrap.querySelector("span");
+      range.value = String(effectParamValue(def.key));
+      value.textContent = Number(range.value).toFixed(digits);
+      paintRange(range);
+      range.addEventListener("input", () => {
+        setEffectParam(def.key, Number(range.value));
+        rememberEffectValue(def.key, Number(range.value));
+        value.textContent = Number(range.value).toFixed(digits);
+        paintRange(range);
+      });
+    }
+    effectControls.append(wrap);
+  }
+}
+
+function rememberEffectValue(key, value) {
+  const id = activeEffect()?.id;
+  if (!id) return;
+  effectValues.set(id, { ...(effectValues.get(id) || {}), [key]: value });
+}
+
+async function reloadCustomEffects() {
+  const records = await loadAll("effects");
+  customEffects.clear();
+  for (const record of records) {
+    if (builtinEffects.has(record.id)) continue;
+    try {
+      customEffects.set(record.id, normalizeEffect(record, reservedUniforms));
+      customEffects.get(record.id).createdAt = record.createdAt;
+    } catch {
+      // 存储里的旧格式记录：跳过
+    }
+  }
+  if (state.effect && !findEffect(state.effect)) activateEffect(null);
+  else if (state.effect && customEffects.has(state.effect)) activateEffect(state.effect);
+  else renderEffects();
+}
+
+// 主体材质里已有的 uniform 名：效果参数不能和它们重名
+const reservedUniforms = new Set([...Object.keys(materialFxUniforms), ...Object.keys(triplanarUniforms), "uSpeedScale"]);
+
+function initEffects() {
+  initEffectInput();
+  effectChannel.addEventListener("message", () => reloadCustomEffects());
+  reloadCustomEffects();
+  // 万一效果代码在某份没检查到的材质里编译失败：关掉效果，避免整个画面坏掉
+  const fallback = renderer.debug.onShaderError;
+  renderer.debug.onShaderError = (gl, program, vertexShader, fragmentShader) => {
+    if (fallback) fallback(gl, program, vertexShader, fragmentShader);
+    else console.error("THREE.WebGLProgram: Shader Error", gl.getShaderInfoLog(fragmentShader) || gl.getShaderInfoLog(vertexShader));
+    if (activeEffect()) {
+      const name = activeEffect().name;
+      setTimeout(() => {
+        activateEffect(null);
+        logEl.textContent = `效果「${name}」在某个材质里编译失败，已关闭`;
+      });
+    }
+  };
+}
+
 // 展示模型：异步加载（Shader Ball 是 GLB），用 token 丢弃过期结果
 let displayToken = 0;
 
@@ -824,6 +1069,9 @@ async function setDisplayModel(id) {
   }
   display.rotation.set(0, 0, 0);
   display.add(parts.root);
+  // 换了模型：重新散布实例，更新模型尺寸输入
+  instanceLayer.scatter(parts.materialMeshes, display);
+  updateModelInputs(parts.materialMeshes);
   applyVoxel();
   // 程序贴图的平铺次数跟着模型走（贴图是共享的，改 repeat 对 PBR / NPR 材质同时生效）
   const repeat = def.uvRepeat || 1;
@@ -1202,7 +1450,36 @@ function renderHints() {
   }
 }
 
+// 输入框里提到效果名（或关键词）：切换效果并触发一次；「关掉效果」关闭。效果词先从句子里去掉，免得被当成材质名
+function promptEffect(text) {
+  const lower = text.toLowerCase();
+  if (/(关|去掉|不要|关闭).{0,3}效果/.test(lower)) return { off: true, rest: lower.replace(/(关|去掉|不要|关闭).{0,3}效果/, "") };
+  for (const record of allEffects()) {
+    const key = [record.name, ...(record.keys || [])].find((item) => item && lower.includes(item.toLowerCase()));
+    if (key) return { record, rest: lower.replace(key.toLowerCase(), "") };
+  }
+  return null;
+}
+
 function applyPrompt(text) {
+  const effect = promptEffect(text);
+  if (effect) {
+    if (effect.off) activateEffect(null);
+    else {
+      activateEffect(effect.record.id);
+      if (effectUses(effect.record, "uClickAge")) pushClick(defaultClickPoint());
+    }
+    const note = effect.off ? "关闭效果" : `效果：${effect.record.name}`;
+    const rest = interpretPrompt(effect.rest, { ...state, nprValues: npr.values });
+    if (!rest.ok) {
+      logEl.textContent = note;
+      return { ok: true, message: note };
+    }
+    const result = applyPrompt(effect.rest);
+    result.message = `${note} · ${result.message}`;
+    logEl.textContent = result.message;
+    return result;
+  }
   const result = interpretPrompt(text, { ...state, nprValues: npr.values });
   logEl.textContent = result.message;
   if (!result.ok) return result;
@@ -1389,6 +1666,7 @@ function tick() {
   shaderUniforms.uTime.value = elapsed;
   materialFxUniforms.uFxTime.value = elapsed;
   materialFxUniforms.uFxFlow.value = elapsed * (state.params.uSpeed ?? 0) * (shaders[state.shader]?.timeScale ?? 1);
+  updateEffectInputs(elapsed);
   // 模型不自动旋转，用鼠标拖动视角查看
   updateTriplanar(display);
   controls.update();
@@ -1416,6 +1694,7 @@ renderChannels();
 renderNprPresets();
 renderDisplayModels();
 initVoxelControls();
+initEffects();
 setStyle(defaultStyle);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
@@ -1468,6 +1747,7 @@ function getState() {
     environment: state.environment,
     displayModel: state.displayModel,
     voxel: { on: state.voxelOn, resolution: state.voxelRes },
+    effect: effectState(),
     colors: Object.fromEntries(colorKeys.map((key) => [key, rgbToHex(state.params[key])])),
     params,
   };
@@ -1551,6 +1831,7 @@ async function setLook(look = {}) {
     npr.setValues(nprValues);
     applyPhysical(state.params);
   }
+  if (look.effect !== undefined) applyEffectLook(look.effect, warnings);
   syncSliders();
   updateTitle();
   logEl.textContent = `AI 调整：${nameEl.textContent}`;
@@ -1725,4 +2006,123 @@ async function deleteShader(input = {}) {
   return { deleted: id, custom: [...customRecords.values()].map(customSummary), state: getState() };
 }
 
-export const shaderMaker = { getState, setLook, describeLook, snapshot, writeShader, readShader, deleteShader };
+// ---- 效果：AI 读写 ----
+
+function effectState() {
+  const record = activeEffect();
+  if (!record) return null;
+  return {
+    id: record.id,
+    name: record.name,
+    custom: customEffects.has(record.id),
+    params: Object.fromEntries(record.params.map((def) => [def.key, def.type === "color" ? effectParamValue(def.key) : round(effectParamValue(def.key))])),
+    clicks: effectInputs.uClickCount.value,
+    clickAge: effectInputs.uClickCount.value ? round(effectInputs.uClickAge.value) : null,
+  };
+}
+
+// set_look 的 effect：传 null / "none" 关闭；对象 { id, params, trigger, freezeAge }
+function applyEffectLook(look, warnings) {
+  if (look === null || look === "none" || look?.id === null || look?.id === "none") {
+    activateEffect(null);
+    return;
+  }
+  const spec = typeof look === "string" ? { id: look } : look;
+  if (spec.id && spec.id !== activeEffect()?.id) {
+    if (!findEffect(spec.id)) {
+      warnings.push(`未知的效果：${spec.id}`);
+      return;
+    }
+    activateEffect(spec.id);
+  }
+  const record = activeEffect();
+  if (!record) {
+    warnings.push("当前没有效果，先传 id");
+    return;
+  }
+  for (const [key, value] of Object.entries(spec.params || {})) {
+    if (setEffectParam(key, value)) rememberEffectValue(key, value);
+    else warnings.push(`效果「${record.name}」没有参数 ${key}`);
+  }
+  // trigger：true = 画面正中；[x, y, z] = 展示空间里的点（会吸附到最近的表面附近，不做检查）
+  if (spec.trigger) {
+    const point = Array.isArray(spec.trigger) && spec.trigger.length === 3 ? new THREE.Vector3(...spec.trigger.map(Number)) : defaultClickPoint();
+    pushClick(point);
+  }
+  // freezeAge：把「距上次点击的秒数」停在这个值，方便截某一刻；null 恢复走时
+  if (spec.freezeAge !== undefined) {
+    if (spec.freezeAge === null) {
+      if (input.clicks[0] && input.frozenAge !== null) input.clicks[0].time = clock.getElapsedTime() - input.frozenAge;
+      input.frozenAge = null;
+    } else {
+      if (!input.clicks.length) pushClick(defaultClickPoint());
+      input.frozenAge = Math.max(0, Number(spec.freezeAge) || 0);
+    }
+  }
+  renderEffectControls();
+}
+
+function effectSummary(record) {
+  return { id: record.id, name: record.name, description: record.description, custom: customEffects.has(record.id) };
+}
+
+function readEffect(spec = {}) {
+  const id = String(spec.id || "").trim();
+  if (!id) return { guide: effectGuide, effects: allEffects().map(effectSummary) };
+  const record = findEffect(id);
+  if (!record) throw new Error(`没有这个效果：${id}`);
+  const { keys, createdAt, ...definition } = record;
+  return { ...definition, custom: customEffects.has(id) };
+}
+
+// 写入：结构校验 → 设为当前效果 → 编译检查（失败就恢复原来的效果并返回带行号的错误）→ 保存
+async function writeEffect(spec = {}) {
+  if (builtinEffects.has(String(spec.id || "").trim())) throw new Error(`「${spec.id}」是内置范例的 id，换一个（可以 read_effect 读它的代码再改）`);
+  const record = normalizeEffect(spec, reservedUniforms);
+  const existing = customEffects.get(record.id);
+  record.createdAt = existing?.createdAt || Date.now();
+  record.updatedAt = Date.now();
+  const previous = activeEffect();
+  setActiveEffect(record, {});
+  const errors = checkEffect(renderer);
+  if (errors.length) {
+    setActiveEffect(previous, previous ? effectValues.get(previous.id) || {} : {});
+    return { compiled: false, errors, message: formatEffectErrors(errors) };
+  }
+  await saveRecord("effects", record);
+  customEffects.set(record.id, record);
+  effectValues.delete(record.id);
+  effectChannel.postMessage({ type: "changed", id: record.id });
+  if (spec.apply === false) activateEffect(previous?.id || null);
+  else activateEffect(record.id);
+  if (spec.apply !== false && spec.trigger) pushClick(defaultClickPoint());
+  logEl.textContent = `${existing ? "已更新" : "已新增"}效果：${record.name}`;
+  return { compiled: true, created: !existing, effect: effectSummary(record), state: getState() };
+}
+
+async function deleteEffect(spec = {}) {
+  const id = String(spec.id || "").trim();
+  if (!customEffects.has(id)) throw new Error(builtinEffects.has(id) ? "内置范例不能删除" : `没有这个自定义效果：${id}`);
+  const name = customEffects.get(id).name;
+  await removeRecord("effects", id);
+  customEffects.delete(id);
+  effectValues.delete(id);
+  effectChannel.postMessage({ type: "changed", id });
+  if (state.effect === id) activateEffect(null);
+  else renderEffects();
+  logEl.textContent = `已删除效果：${name}`;
+  return { deleted: id, effects: allEffects().map(effectSummary), state: getState() };
+}
+
+export const shaderMaker = {
+  getState,
+  setLook,
+  describeLook,
+  snapshot,
+  writeShader,
+  readShader,
+  deleteShader,
+  writeEffect,
+  readEffect,
+  deleteEffect,
+};

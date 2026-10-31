@@ -67,6 +67,35 @@ python3 serve.py          # → http://127.0.0.1:5173（禁用缓存，改完刷
 
 ---
 
+## 🧩 可编程效果（基础能力）
+
+ShaderMaker 不写死具体特效，而是提供一套基础能力，具体效果用它组出来。一个效果 = 参数 + 下面任选几部分（`src/effects.js`）：
+
+| 部分 | 写什么 | 能做出什么 |
+|---|---|---|
+| **overlay** | `vec3 overlay(pos, normal, color)` / `vec3 overlayEmissive(pos, normal)`，在模型表面逐像素执行，拿得到展示空间坐标 | 从点击处扩散的换色、扫描线、溶解、光圈 |
+| **deform** | `vec3 deform(pos, normal)`，在主体顶点上执行 | 涟漪、膨胀、波浪——法线自动重算，描边 / 阴影 / 滤镜自动跟上 |
+| **instances** | 选几何（羽片 / 四边形 / 方块 / 圆锥 / 球 / 自定义顶点），表面按面积散布最多 6 万个，写 `instanceVertex(p, n, color)` | 鳞片、羽毛、草、尖刺、碎片 |
+| **common** | 共用的辅助函数 | — |
+
+- **输入**：`uTime`、最近两次点击的位置和距今秒数（`uClickPos` / `uClickAge` / `uClickCount` / `uPrevClick*`）、鼠标指着的表面点（`uPointerPos` / `uPointerOn`）、模型中心和尺寸。
+- **参数**：效果自己声明 `{ key, label, min, max, default }` 或颜色，面板自动生成滑条 / 取色器，`set_look` 也能调。
+- **自动接好**：写实 / 卡通、体素（表面部分）、阴影、「仅模型」滤镜的遮罩和勾线、通道查看——效果代码按标记注入所有相关材质，改了就重新编译。
+- **编译检查**：写入时把所有相关材质在测试几何上编译一遍，错误定位到「哪一部分第几行」；不通过就恢复原来的效果。
+- **存储**：自定义效果存在本机浏览器（IndexedDB，和自定义 Shader 同一个库）。
+
+内置三个范例，全部只用上面的能力写成（`src/effectExamples.js`），也是 AI 的模板：
+
+| 范例 | 用到 |
+|---|---|
+| 鳞片绽放 `scaleBloom` | instances（羽片，翘起 / 扭转 / 卷曲）+ overlay（换色），点击触发、交替换色 |
+| 点击涟漪 `ripple` | deform（波包起伏）+ overlayEmissive（波峰发光） |
+| 悬停光圈 `hoverHalo` | overlayEmissive，跟着鼠标指针 |
+
+AI 工具：`read_effect`（写法说明 / 读范例）、`write_effect`（编译检查后保存并启用）、`delete_effect`；`set_look` 的 `effect` 切换效果、调参数、`trigger` 模拟点击、`freezeAge` 停在某一刻截图。
+
+---
+
 ## 🎨 材质库
 
 ### PBR · 26 个
@@ -213,6 +242,7 @@ npm run build:plugin      # → dist/cindy-plugin/
 | `read_shader` | 不传 id：自定义 Shader 写法说明 + 全部 Shader 列表；传 id：某个 Shader 的 GLSL 源码当模板；`library`：可平铺函数库的全部签名和返回值 |
 | `write_shader` | AI 直接写 GLSL 新建 / 修改自定义 Shader，先编译检查，失败返回带行号的错误，通过后加入「自定义」分组 |
 | `delete_shader` | 删除自定义 Shader（内置的不能删） |
+| `read_effect` / `write_effect` / `delete_effect` | 可编程效果：读写法说明和范例、写入（编译检查）、删除，见「可编程效果」 |
 
 - 没有打开的 ShaderMaker 页面时，会自动在当前任务的右侧栏打开任务页（首次加载约 2 秒）。
 - 同一份页面有两个入口：主视图（`mainView`）和任务页（`taskView`）。可能同时开着好几份，后台按「当前任务的任务页 → 主视图 → 其它」选一份执行，不会重复执行。
@@ -249,7 +279,10 @@ src/
 ├── app.js           场景与界面；末尾导出给 Cindy 插件的 shaderMaker 控制接口
 ├── shaders.js       GLSL：公共噪声 / Voronoi、Surface 协议、58 个 Shader、timeScales
 ├── presets.js       PBR 材质库、Shader 预设、分类、滑条定义
-├── customShaders.js 自定义 Shader：写法说明、编译检查、IndexedDB 存储
+├── customShaders.js 自定义 Shader：写法说明、编译检查
+├── effects.js       可编程效果：输入、参数、GLSL 注入、实例层、编译检查
+├── effectExamples.js 内置效果范例（鳞片绽放 / 点击涟漪 / 悬停光圈）
+├── store.js         本机浏览器存储（IndexedDB）
 ├── materialFx.js    置换、积雪、SSS、冰下碎冰（PBR / NPR / 体素 + 描边 / 阴影 / 滤镜共用的顶点外推）
 ├── triplanar.js     三向投影、可平铺处理
 ├── npr.js           NPR 光照模型、描边、PBR → NPR 转换规则

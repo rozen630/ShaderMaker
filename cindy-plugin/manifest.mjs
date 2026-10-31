@@ -12,9 +12,9 @@ export function buildManifest(catalog, version) {
     minCindyVersion: "0.1.120",
     id: "shadermaker",
     name: "ShaderMaker",
-    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化；AI 可以直接写 GLSL 新增自定义 Shader。",
+    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化；AI 可以直接写 GLSL 新增自定义 Shader，以及套在模型上的可编程效果（表面、形变、实例几何，响应点击 / 指针）。",
     whenToUse:
-      "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，或想看材质在不同环境光下的渲染结果，或想让 AI 写一个新的程序化材质 / Shader 效果时找我",
+      "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，或想看材质在不同环境光下的渲染结果，或想让 AI 写一个新的程序化材质 / Shader 效果、或模型上的动态效果（点击扩散、鳞片 / 羽毛 / 草等实例几何、形变）时找我",
     version,
     entry: "main.js",
     icon: "assets/icon.png",
@@ -81,6 +81,17 @@ export function buildManifest(catalog, version) {
                 uAccent: { type: "string", description: "高光 / 点缀色 #rrggbb" },
               },
               description: "材质三色（#rrggbb）",
+            },
+            effect: {
+              type: ["object", "string", "null"],
+              description:
+                "当前效果（read_effect 可列出：内置 scaleBloom 鳞片绽放 / ripple 点击涟漪 / hoverHalo 悬停光圈，以及 write_effect 写的）。传 null 关闭；传对象 { id, params, trigger, freezeAge }：id 切换效果，params 调效果参数，trigger=true 模拟一次点击（画面正中对着的表面点），freezeAge 把「距上次点击的秒数」停在某个值方便 snapshot 截某一刻（null 恢复）。",
+              properties: {
+                id: { type: ["string", "null"], description: "效果 id；null 关闭" },
+                params: { type: "object", description: "效果参数，键是效果声明的 key，颜色传 #rrggbb" },
+                trigger: { type: "boolean", description: "模拟点击一次" },
+                freezeAge: { type: ["number", "null"], description: "停在点击后第几秒；null 恢复" },
+              },
             },
             nprValues: {
               type: "object",
@@ -154,6 +165,49 @@ export function buildManifest(catalog, version) {
           },
           required: ["id", "code"],
         },
+      },
+      {
+        name: "read_effect",
+        description:
+          "读取 ShaderMaker 效果的写法说明和定义。效果是套在展示模型上的可编程层：overlay（表面逐像素换色 / 自发光）、deform（顶点形变）、instances（在表面散布实例几何，如鳞片、羽毛、草、尖刺），能读时间、点击、鼠标指针等输入，并声明自己的参数（自动生成面板滑条）。不传 id：返回写法说明和效果列表——第一次写效果前先调一次；传 id：返回该效果的完整定义（可以拿内置范例 scaleBloom / ripple / hoverHalo 当模板）。只读。",
+        parameters: {
+          type: "object",
+          properties: { id: { type: "string", description: "效果 id；不传返回写法说明和列表" } },
+        },
+      },
+      {
+        name: "write_effect",
+        description:
+          "新建或修改一个自定义效果：提交效果定义（参数 + GLSL 片段），页面在所有相关材质（写实 / 卡通主体、描边、阴影、滤镜）里编译检查。失败返回带「部分 + 行号」的错误，改了再调；通过后保存到这台电脑的浏览器存储，加入面板「效果」列表并（默认）立刻启用。写之前先用 read_effect 看写法说明。写完用 set_look 的 effect.trigger / freezeAge 配合 snapshot 检查。只改页面和本机浏览器存储，不写工作目录文件、不联网。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "英文 id，字母开头，2–40 位；同 id 覆盖已有自定义效果，不能和内置范例重名" },
+            name: { type: "string", description: "显示名称" },
+            description: { type: "string", description: "一句话说明（面板提示用）" },
+            params: {
+              type: "array",
+              description: "参数：{ key: 'uXxx', label, min, max, default, lite? } 或 { key, label, type: 'color', default: '#rrggbb', lite? }；代码里当 uniform 用",
+              items: { type: "object" },
+            },
+            common: { type: "string", description: "共用 GLSL 辅助函数" },
+            overlay: { type: "string", description: "定义 vec3 overlay(vec3 pos, vec3 normal, vec3 color) 和 / 或 vec3 overlayEmissive(vec3 pos, vec3 normal)" },
+            deform: { type: "string", description: "定义 vec3 deform(vec3 pos, vec3 normal)" },
+            instances: {
+              type: "object",
+              description:
+                "实例：{ count（≤60000）, seed, geometry: { type: blade|quad|box|cone|sphere|custom, … }, material: { metalness, roughness, specular, clearcoat, iridescence, emissive, envMap, doubleSided }, vertex: 定义 vec3 instanceVertex(vec3 p, inout vec3 n, inout vec3 color), fragment?: 定义 vec3 instanceFragment(vec3 color, vec3 local) }",
+            },
+            apply: { type: "boolean", description: "通过后是否立刻启用，默认 true" },
+            trigger: { type: "boolean", description: "启用后模拟点击一次" },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "delete_effect",
+        description: "删除一个自定义效果（内置范例不能删）。从这台电脑的浏览器存储和面板里移除，不可撤销。",
+        parameters: { type: "object", properties: { id: { type: "string", description: "要删除的效果 id" } }, required: ["id"] },
       },
       {
         name: "delete_shader",

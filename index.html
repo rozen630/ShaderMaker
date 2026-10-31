@@ -21,6 +21,11 @@
         "./src/voxel.js": "./src/voxel.js?v=20261029-fx7",
         "./src/triplanar.js": "./src/triplanar.js?v=20261029-fx7",
         "./src/materialFx.js": "./src/materialFx.js?v=20261029-fx7",
+        "./src/effects.js": "./src/effects.js?v=20261029-fx7",
+        "./src/effectExamples.js": "./src/effectExamples.js?v=20261029-fx7",
+        "./src/store.js": "./src/store.js?v=20261029-fx7",
+        "./src/customShaders.js": "./src/customShaders.js?v=20261029-fx7",
+        "./src/packedHdr.js": "./src/packedHdr.js?v=20261029-fx7",
         "./src/vendor/tileable-shaders.js": "./src/vendor/tileable-shaders.js?v=20261029-fx7"
       }
     }
@@ -130,6 +135,15 @@
           </label>
           <input id="voxel-resolution" type="range" min="12" max="96" step="2" value="48" disabled />
         </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>效果</h2>
+          <span id="effect-hint" class="effect-hint"></span>
+        </div>
+        <div id="effects" class="chips"></div>
+        <div id="effect-controls" class="sliders effect-controls" hidden></div>
       </section>
 
       <section class="section">
