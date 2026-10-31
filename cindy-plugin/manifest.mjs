@@ -12,7 +12,7 @@ export function buildManifest(catalog, version) {
     minCindyVersion: "0.1.120",
     id: "shadermaker",
     name: "ShaderMaker",
-    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化；AI 可以直接写 GLSL 新增自定义 Shader，以及套在模型上的可编程效果（表面、形变、实例几何，响应点击 / 指针）。",
+    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化，可导入自己的 GLB 模型；AI 可以直接写 GLSL 新增自定义 Shader，以及套在模型上的可编程效果（表面、形变、实例几何，响应点击 / 指针）。",
     whenToUse:
       "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，或想看材质在不同环境光下的渲染结果，或想让 AI 写一个新的程序化材质 / Shader 效果、或模型上的动态效果（点击扩散、鳞片 / 羽毛 / 草等实例几何、形变）时找我",
     version,
