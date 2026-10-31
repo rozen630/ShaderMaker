@@ -4,7 +4,8 @@
 
 ---
 
-## 🤖 未发布 · AI 写 Shader
+## 🤖 1.6.0 · AI 写 Shader，插件包瘦身
+<sub>2026-10-31 · 标签 `v1.6.0`</sub>
 
 - 新增 AI 工具 `read_shader` / `write_shader` / `delete_shader`：AI 可以直接写 GLSL 新增或修改 Shader。
 - 提交时逐个通道编译检查，失败返回对应 AI 代码行号的错误，方便它改了再交。
