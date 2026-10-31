@@ -33,6 +33,7 @@ import {
   triplanarFragmentHead,
 } from "./triplanar.js";
 import { applyMaterialFx, applyFxVertex, materialFxUniforms } from "./materialFx.js";
+import { createScales, scaleDefaults } from "./scales.js";
 
 const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
@@ -298,6 +299,10 @@ applyMaterialFx(nprSubjectMaterial, { toon: true });
 // 阴影也要跟着积雪 / 置换推出去，否则影子还是原来的形状
 const displacedDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
 applyFxVertex(displacedDepthMaterial);
+// 鳞片绽放：实例化鳞片挂在 display 组下（坐标和三向投影同一个展示空间），也进主体遮罩，「仅模型」滤镜会处理它
+const scales = createScales(npr);
+display.add(scales.mesh);
+scales.mesh.layers.enable(MASK_LAYER);
 const voxelNeutralMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0 });
 applyVoxelSupport(voxelNeutralMaterial);
 let voxelGroup = null;
@@ -674,6 +679,9 @@ function refreshRenderState() {
   const debug = state.channel !== "final";
   const subjectMaterial = debug ? channelMaterial : nprOn ? nprSubjectMaterial : cubeMaterial;
   for (const mesh of displayParts.materialMeshes) mesh.material = subjectMaterial;
+  scales.setRender(nprOn);
+  // 体素化时鳞片根部埋在方块里、通道查看只看贴图，都不画鳞片（表面换色照常）
+  scales.setHidden(debug || state.voxelOn);
   // 校色件（内芯色环、灰底盘）是参照物，任何模式下都保持写实
   for (const mesh of displayParts.neutralMeshes) mesh.material = mesh.userData.pbrMaterial;
   for (const mesh of voxelGroup?.children || []) {
@@ -788,6 +796,120 @@ function initVoxelControls() {
   syncVoxelControls();
 }
 
+// ---- 鳞片绽放：开关、颜色、参数，点击模型触发 ----
+
+const scaleToggle = document.getElementById("scale-toggle");
+const scaleControls = document.getElementById("scale-controls");
+const scaleColorFrom = document.getElementById("scale-color-from");
+const scaleColorTo = document.getElementById("scale-color-to");
+const scaleSliderRoot = document.getElementById("scale-sliders");
+const scaleFlowRoot = document.getElementById("scale-flow");
+const scaleSliders = [
+  { key: "density", label: "数量", min: 2000, max: 40000, step: 500, digits: 0 },
+  { key: "size", label: "大小", min: 0.03, max: 0.25, step: 0.005, digits: 3 },
+  { key: "speed", label: "扩散速度", min: 0.1, max: 2, step: 0.05, digits: 2 },
+  { key: "lift", label: "翘起", min: 0, max: 1.6, step: 0.02, digits: 2 },
+  { key: "twist", label: "扭转", min: 0, max: 2.5, step: 0.05, digits: 2 },
+  { key: "curl", label: "卷曲", min: 0, max: 1, step: 0.02, digits: 2 },
+];
+
+function syncScaleControls() {
+  if (scaleToggle) scaleToggle.checked = scales.enabled;
+  if (scaleControls) scaleControls.hidden = !scales.enabled;
+  if (scaleColorFrom) scaleColorFrom.value = rgbToHex(scales.options.colorFrom);
+  if (scaleColorTo) scaleColorTo.value = rgbToHex(scales.options.colorTo);
+  for (const def of scaleSliders) {
+    const input = scaleSliderRoot?.querySelector(`input[data-key="${def.key}"]`);
+    if (!input) continue;
+    input.value = String(scales.options[def.key]);
+    paintRange(input);
+    scaleSliderRoot.querySelector(`span[data-key="${def.key}"]`).textContent = Number(scales.options[def.key]).toFixed(def.digits);
+  }
+  for (const button of scaleFlowRoot?.querySelectorAll("[data-flow]") || []) {
+    button.classList.toggle("active", button.dataset.flow === scales.options.flow);
+  }
+}
+
+function setScalesEnabled(on) {
+  scales.setEnabled(on);
+  syncScaleControls();
+}
+
+// 屏幕坐标 → 模型表面上的点（展示空间）；没打到返回 null
+const scaleRaycaster = new THREE.Raycaster();
+function pickSurface(ndcX, ndcY) {
+  scaleRaycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  const hit = scaleRaycaster.intersectObjects(displayParts.materialMeshes, false)[0];
+  return hit ? display.worldToLocal(hit.point.clone()) : null;
+}
+
+// 播放按钮 / AI 触发：从画面正中对着的那一点开始；正中没有模型就从模型顶部开始
+function playScales() {
+  if (!scales.enabled) setScalesEnabled(true);
+  let origin = pickSurface(0, 0);
+  if (!origin) {
+    const box = new THREE.Box3();
+    for (const mesh of displayParts.materialMeshes) box.expandByObject(mesh);
+    origin = display.worldToLocal(new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2));
+  }
+  scales.play(origin, clock.getElapsedTime());
+  return origin;
+}
+
+function initScaleControls() {
+  scaleToggle?.addEventListener("change", () => {
+    setScalesEnabled(scaleToggle.checked);
+    logEl.textContent = scales.enabled ? "鳞片绽放：点击模型触发" : "关闭鳞片绽放";
+  });
+  for (const [input, key] of [
+    [scaleColorFrom, "colorFrom"],
+    [scaleColorTo, "colorTo"],
+  ]) {
+    input?.addEventListener("input", () => scales.setOptions({ [key]: hexToRgb(input.value) }));
+  }
+  document.getElementById("scale-play")?.addEventListener("click", () => playScales());
+  for (const def of scaleSliders) {
+    const wrap = document.createElement("div");
+    wrap.className = "slider";
+    wrap.innerHTML = `
+      <label>
+        <b>${def.label}</b>
+        <span data-key="${def.key}"></span>
+      </label>
+      <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" data-key="${def.key}" />
+    `;
+    const input = wrap.querySelector("input");
+    input.addEventListener("input", () => {
+      scales.setOptions({ [def.key]: Number(input.value) });
+      syncScaleControls();
+    });
+    scaleSliderRoot?.append(wrap);
+  }
+  scaleFlowRoot?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-flow]");
+    if (!button) return;
+    scales.setOptions({ flow: button.dataset.flow });
+    syncScaleControls();
+  });
+  // 点击（不是拖动视角）模型时从点击处开始一波
+  let down = null;
+  canvas.addEventListener("pointerdown", (event) => {
+    down = { x: event.clientX, y: event.clientY, time: performance.now() };
+  });
+  canvas.addEventListener("pointerup", (event) => {
+    if (!down || !scales.enabled) return;
+    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
+    const quick = performance.now() - down.time < 400;
+    down = null;
+    if (moved > 5 || !quick) return;
+    const rect = canvas.getBoundingClientRect();
+    const point = pickSurface(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    if (point) scales.play(point, clock.getElapsedTime());
+  });
+  scales.setOptions({});
+  syncScaleControls();
+}
+
 // 展示模型：异步加载（Shader Ball 是 GLB），用 token 丢弃过期结果
 let displayToken = 0;
 
@@ -824,6 +946,9 @@ async function setDisplayModel(id) {
   }
   display.rotation.set(0, 0, 0);
   display.add(parts.root);
+  // 换了模型：重新散布鳞片，正在播放的波作废
+  scales.scatter(parts.materialMeshes, display);
+  scales.setEnabled(scales.enabled);
   applyVoxel();
   // 程序贴图的平铺次数跟着模型走（贴图是共享的，改 repeat 对 PBR / NPR 材质同时生效）
   const repeat = def.uvRepeat || 1;
@@ -1226,6 +1351,7 @@ function applyPrompt(text) {
   else if (result.voxel === "on") setVoxel(true);
   else if (result.voxel) setVoxel(true, voxelPresets[result.voxel]);
   if (result.render && result.render !== state.render) setRender(result.render);
+  if (result.scales) applyScaleLook(result.scales, []);
   else syncSliders();
   updateTitle();
   return result;
@@ -1389,6 +1515,7 @@ function tick() {
   shaderUniforms.uTime.value = elapsed;
   materialFxUniforms.uFxTime.value = elapsed;
   materialFxUniforms.uFxFlow.value = elapsed * (state.params.uSpeed ?? 0) * (shaders[state.shader]?.timeScale ?? 1);
+  scales.update(elapsed);
   // 模型不自动旋转，用鼠标拖动视角查看
   updateTriplanar(display);
   controls.update();
@@ -1416,6 +1543,7 @@ renderChannels();
 renderNprPresets();
 renderDisplayModels();
 initVoxelControls();
+initScaleControls();
 setStyle(defaultStyle);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
@@ -1468,6 +1596,7 @@ function getState() {
     environment: state.environment,
     displayModel: state.displayModel,
     voxel: { on: state.voxelOn, resolution: state.voxelRes },
+    scales: scaleState(),
     colors: Object.fromEntries(colorKeys.map((key) => [key, rgbToHex(state.params[key])])),
     params,
   };
@@ -1551,6 +1680,7 @@ async function setLook(look = {}) {
     npr.setValues(nprValues);
     applyPhysical(state.params);
   }
+  if (look.scales && typeof look.scales === "object") applyScaleLook(look.scales, warnings);
   syncSliders();
   updateTitle();
   logEl.textContent = `AI 调整：${nameEl.textContent}`;
@@ -1563,6 +1693,45 @@ async function describeLook(text) {
   // 环境 / 模型是异步加载的，等一下再回报状态
   await new Promise((resolve) => setTimeout(resolve, 50));
   return { ok: result.ok, message: result.message, state: getState() };
+}
+
+function scaleState() {
+  const progress = scales.progress(clock.getElapsedTime());
+  return {
+    on: scales.enabled,
+    progress: progress === null ? null : round(progress),
+    colorFrom: rgbToHex(scales.options.colorFrom),
+    colorTo: rgbToHex(scales.options.colorTo),
+    flow: scales.options.flow,
+    ...Object.fromEntries(scaleSliders.map((def) => [def.key, round(scales.options[def.key])])),
+  };
+}
+
+// set_look 的 scales：开关、颜色、参数、播放（play）和停在某个进度（progress 0–1，方便截图）
+function applyScaleLook(look, warnings) {
+  if (look.on !== undefined) setScalesEnabled(Boolean(look.on));
+  const next = {};
+  for (const key of ["colorFrom", "colorTo"]) {
+    if (look[key] === undefined) continue;
+    const rgb = hexToRgb(look[key]);
+    if (rgb) next[key] = rgb;
+    else warnings.push(`无效的鳞片颜色：${key}=${look[key]}`);
+  }
+  for (const def of scaleSliders) {
+    if (look[def.key] === undefined) continue;
+    if (!Number.isFinite(Number(look[def.key]))) warnings.push(`无效的鳞片参数：${def.key}`);
+    else next[def.key] = THREE.MathUtils.clamp(Number(look[def.key]), def.min, def.max);
+  }
+  if (look.flow !== undefined) {
+    if (look.flow === "z" || look.flow === "radial") next.flow = look.flow;
+    else warnings.push(`未知的鳞片朝向：${look.flow}`);
+  }
+  if (Object.keys(next).length) scales.setOptions(next);
+  const now = clock.getElapsedTime();
+  if (look.play || (look.progress !== undefined && !scales.playing)) playScales();
+  if (look.progress !== undefined && look.progress !== null) scales.freeze(Number(look.progress) || 0, now);
+  else if (look.progress === null) scales.freeze(null, now);
+  syncScaleControls();
 }
 
 // 截图：当场渲染一帧再读画布（WebGL 画布不保留绘制缓冲，必须在同一个任务里读）

@@ -21,6 +21,9 @@
         "./src/voxel.js": "./src/voxel.js?v=20261029-fx7",
         "./src/triplanar.js": "./src/triplanar.js?v=20261029-fx7",
         "./src/materialFx.js": "./src/materialFx.js?v=20261029-fx7",
+        "./src/scales.js": "./src/scales.js?v=20261029-fx7",
+        "./src/customShaders.js": "./src/customShaders.js?v=20261029-fx7",
+        "./src/packedHdr.js": "./src/packedHdr.js?v=20261029-fx7",
         "./src/vendor/tileable-shaders.js": "./src/vendor/tileable-shaders.js?v=20261029-fx7"
       }
     }
@@ -129,6 +132,38 @@
             <span id="voxel-resolution-value">48</span>
           </label>
           <input id="voxel-resolution" type="range" min="12" max="96" step="2" value="48" disabled />
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>鳞片绽放</h2>
+          <label class="switch" title="点击模型，鳞片从点击处向外翻起、扭转，表面跟着换色">
+            <input id="scale-toggle" type="checkbox" />
+            <span></span>
+          </label>
+        </div>
+        <div id="scale-controls" class="scale-controls" hidden>
+          <div class="row">
+            <span>颜色</span>
+            <div class="scale-colors">
+              <input id="scale-color-from" type="color" value="#1ad9cc" title="起始色（鳞片尖）" />
+              <span class="scale-arrow">→</span>
+              <input id="scale-color-to" type="color" value="#d91fd9" title="目标色（表面换成的颜色）" />
+            </div>
+          </div>
+          <div class="row">
+            <span class="scale-hint">点击模型触发，再点一次换回来</span>
+            <button id="scale-play" type="button" class="scale-play">播放</button>
+          </div>
+          <div id="scale-sliders" class="sliders pro-only"></div>
+          <div class="row pro-only" title="鳞片沿哪个方向排列">
+            <span>朝向</span>
+            <div id="scale-flow" class="segmented segmented-mini">
+              <button type="button" data-flow="z" class="active">沿 Z 轴</button>
+              <button type="button" data-flow="radial">背离点击</button>
+            </div>
+          </div>
         </div>
       </section>
 

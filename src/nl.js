@@ -172,6 +172,16 @@ export function interpretPrompt(raw, state) {
       break;
     }
   }
+  // 鳞片绽放
+  let scales;
+  if (/(关|去掉|不要).{0,3}鳞片/.test(text)) {
+    scales = { on: false };
+    notes.push("关闭鳞片绽放");
+  }
+  else if (/鳞片|羽毛|绽放|scales?\b|feathers?/.test(text)) {
+    scales = { on: true, play: true };
+    notes.push("鳞片绽放");
+  }
   // 自定义 Shader（AI 写的）按名字匹配
   if (presetId === (state.preset || state.shader)) {
     for (const [id, preset] of Object.entries(presets)) {
@@ -433,6 +443,7 @@ export function interpretPrompt(raw, state) {
     nprValues,
     displayModel,
     voxel,
+    scales,
     params: next,
     message: notes.join(" · "),
   };

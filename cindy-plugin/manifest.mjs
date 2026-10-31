@@ -12,7 +12,7 @@ export function buildManifest(catalog, version) {
     minCindyVersion: "0.1.120",
     id: "shadermaker",
     name: "ShaderMaker",
-    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化；AI 可以直接写 GLSL 新增自定义 Shader。",
+    description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜、Teardown 式体素化和鳞片绽放动画；AI 可以直接写 GLSL 新增自定义 Shader。",
     whenToUse:
       "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，或想看材质在不同环境光下的渲染结果，或想让 AI 写一个新的程序化材质 / Shader 效果时找我",
     version,
@@ -81,6 +81,30 @@ export function buildManifest(catalog, version) {
                 uAccent: { type: "string", description: "高光 / 点缀色 #rrggbb" },
               },
               description: "材质三色（#rrggbb）",
+            },
+            scales: {
+              type: "object",
+              description:
+                "鳞片绽放：模型表面长出一片片立体鳞片，从起点向外传播——经过时翘起、扭转，之后平伏，表面换成目标色。再播放一次会换回来。用户也可以直接点击模型触发。",
+              properties: {
+                on: { type: "boolean", description: "开关" },
+                play: { type: "boolean", description: "true = 从画面正中对着的模型表面开始播放一波" },
+                progress: {
+                  type: ["number", "null"],
+                  minimum: 0,
+                  maximum: 1,
+                  description: "把当前这一波停在某个进度（0–1，0.3 左右鳞片最多），方便 snapshot 截图；没有波时会先播放；null = 继续播放",
+                },
+                colorFrom: { type: "string", description: "起始色 #rrggbb（鳞片尖）" },
+                colorTo: { type: "string", description: "目标色 #rrggbb（鳞片根和换色后的表面）" },
+                density: { type: "number", minimum: 2000, maximum: 40000, description: "鳞片数量，默认 20000" },
+                size: { type: "number", minimum: 0.03, maximum: 0.25, description: "鳞片大小（模型高约 1.5），默认 0.12" },
+                speed: { type: "number", minimum: 0.1, maximum: 2, description: "扩散速度，默认 0.55" },
+                lift: { type: "number", minimum: 0, maximum: 1.6, description: "翘起角度（弧度），默认 0.75" },
+                twist: { type: "number", minimum: 0, maximum: 2.5, description: "扭转，默认 0.6" },
+                curl: { type: "number", minimum: 0, maximum: 1, description: "卷曲，默认 0.35" },
+                flow: { type: "string", enum: ["z", "radial"], description: "鳞片朝向：z = 沿模型 Z 轴排列，radial = 背离起点" },
+              },
             },
             nprValues: {
               type: "object",

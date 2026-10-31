@@ -12,6 +12,7 @@
 // 顶点外推的部分（fxVertex）还要打在描边外壳、阴影、滤镜的遮罩 / 法线深度上（applyFxVertex），形状才一致。
 import * as THREE from "three";
 import { triplanarUniforms } from "./triplanar.js";
+import { waveUniforms } from "./scales.js";
 
 export const materialFxUniforms = {
   uSss: { value: 0 },
@@ -175,6 +176,13 @@ uniform vec3 uIceDeepColor;
 uniform vec3 uIcePlateColor;
 uniform float uFxTime;
 uniform float uFxFlow;
+uniform float uWaveOn;
+uniform vec3 uWaveCenter;
+uniform float uWaveRadius;
+uniform float uWaveSoft;
+uniform vec3 uWaveColor;
+uniform vec3 uWaveBase;
+uniform float uWaveBaseMix;
 varying float vFxVoxelSnow;
 varying vec3 vFxVoxelCenter;
 varying vec3 vFxVoxelEye;
@@ -242,6 +250,13 @@ if (uIceLayers > 0.001) {
   diffuseColor.rgb = mix(mix(diffuseColor.rgb, below, uIceLayers), diffuseColor.rgb, surfaceMask);
 }
 float fxSnow = snowMask();
+// 鳞片绽放（scales.js）：先铺上一次换好的颜色，波前之后换成新颜色
+if (uWaveOn > 0.5) {
+  vec3 wavePos = vTriInstanced > 0.5 ? vFxVoxelCenter : vTriPos;
+  diffuseColor.rgb = mix(diffuseColor.rgb, uWaveBase, uWaveBaseMix);
+  float waveInside = 1.0 - smoothstep(-uWaveSoft, uWaveSoft, distance(wavePos, uWaveCenter) - uWaveRadius);
+  diffuseColor.rgb = mix(diffuseColor.rgb, uWaveColor, waveInside);
+}
 vec3 fxSnowGrain = vTriInstanced > 0.5 ? vFxVoxelCenter : vTriPos;
 diffuseColor.rgb = mix(diffuseColor.rgb, uSnowColor * (0.9 + 0.1 * fxNoise(fxSnowGrain * 40.0)), fxSnow);
 `;
@@ -345,7 +360,7 @@ export function applyMaterialFx(material, { toon = false } = {}) {
   const previous = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
   material.onBeforeCompile = (shader, renderer) => {
-    Object.assign(shader.uniforms, materialFxUniforms);
+    Object.assign(shader.uniforms, materialFxUniforms, waveUniforms);
     // 先挂占位，再交给后面的补丁（triplanar 会把这些 include 展开成三向投影采样）
     shader.vertexShader = shader.vertexShader.replace("#include <begin_vertex>", vertexDisplace);
     shader.fragmentShader = shader.fragmentShader
@@ -360,6 +375,6 @@ export function applyMaterialFx(material, { toon = false } = {}) {
     shader.vertexShader = shader.vertexShader.replace("void main() {", `${vertexDecl}\nvoid main() {`);
     shader.fragmentShader = shader.fragmentShader.replace("void main() {", `${fragmentHead}\nvoid main() {`);
   };
-  material.customProgramCacheKey = () => `${previousKey.call(material)}-fx-4${toon ? "-toon" : ""}`;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}-fx-5${toon ? "-toon" : ""}`;
   material.needsUpdate = true;
 }

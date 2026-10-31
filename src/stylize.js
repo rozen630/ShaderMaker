@@ -2,6 +2,7 @@
 // 管线：RenderPass → Bloom → OutputPass（色调映射 + sRGB）→ StylePass（显示空间）
 import * as THREE from "three";
 import { applyFxVertex } from "./materialFx.js";
+import { applyScaleVertex } from "./scales.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -238,6 +239,7 @@ void main() {
 `,
 });
 applyFxVertex(normalDepthMaterial);
+applyScaleVertex(normalDepthMaterial);
 
 export function createStylizer(renderer, scene, camera) {
   // stencilBuffer：NPR 主体描边靠模板缓冲避开主体本身
@@ -270,6 +272,7 @@ export function createStylizer(renderer, scene, camera) {
   stylePass.uniforms.tMask.value = maskTarget.texture;
   const maskMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
   applyFxVertex(maskMaterial);
+  applyScaleVertex(maskMaterial);
   let subjectOnly = true;
   const clearColor = new THREE.Color();
 
