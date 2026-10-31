@@ -18,6 +18,8 @@ const handlers = {
   writeEffect: (payload) => shaderMaker.writeEffect(payload),
   readEffect: (payload) => shaderMaker.readEffect(payload),
   deleteEffect: (payload) => shaderMaker.deleteEffect(payload),
+  importModel: (payload) => shaderMaker.importModelFrom(payload),
+  deleteModel: (payload) => shaderMaker.deleteModel(payload),
 };
 
 channel.addEventListener("message", async ({ data }) => {

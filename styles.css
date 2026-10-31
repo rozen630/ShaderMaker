@@ -984,3 +984,29 @@ input[type="range"]::-moz-range-thumb {
   border: 0;
   border-radius: 4px;
 }
+
+/* 导入的模型：模型名一行、部件开关一行 */
+.imported-models:not(:empty) {
+  margin-top: 10px;
+}
+
+.model-parts {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.viewport.drop-target::after {
+  content: "松开导入模型";
+  position: absolute;
+  inset: 16px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--stroke-strong);
+  border-radius: 18px;
+  color: var(--text);
+  font-size: 15px;
+  background: rgba(8, 9, 11, 0.45);
+  pointer-events: none;
+  z-index: 5;
+}

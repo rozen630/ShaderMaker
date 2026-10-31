@@ -75,6 +75,8 @@ uniform float uTriScale;
 uniform float uVoxelSize;
 uniform sampler2D tDisplace;
 attribute vec3 outlineNormal;
+// 导入模型：顶点最长相邻边（展示空间），没有这个属性时读到 0 = 足够细
+attribute float fxEdge;
 varying float vFxVoxelSnow;
 varying vec3 vFxVoxelCenter;
 varying vec3 vFxVoxelEye;
@@ -110,6 +112,8 @@ vFxVoxelEye = vec3(0.0, 0.0, -1.0);
       float h = texture2D(tDisplace, tp.zy).a * w.x + texture2D(tDisplace, tp.xz).a * w.y + texture2D(tDisplace, tp.xy).a * w.z;
       fxPush += (h - 0.5) * 2.0 * uDisplace;
     }
+    // 三角形比起伏还粗的地方减弱外推，免得把大三角形顶成尖刺
+    fxPush *= 1.0 - smoothstep(0.03, 0.09, fxEdge);
     transformed += normalize(outlineNormal) * fxPush / fxScale;
   }
 #else

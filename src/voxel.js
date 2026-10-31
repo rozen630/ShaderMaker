@@ -100,7 +100,7 @@ export function voxelize(meshes, relativeTo, resolution) {
   // key -> 离体素中心最近的采样（UV 取最近的，避免跨 UV 接缝时取平均）
   const cells = new Map();
 
-  for (const { kind, matrix, geometry } of entries) {
+  for (const { mesh, kind, matrix, geometry } of entries) {
     const position = geometry.attributes.position;
     const uv = geometry.attributes.uv;
     const index = geometry.index;
@@ -144,7 +144,8 @@ export function voxelize(meshes, relativeTo, resolution) {
             .addScaledVector(new THREE.Vector3().fromBufferAttribute(position, ib), b)
             .addScaledVector(new THREE.Vector3().fromBufferAttribute(position, ic), c);
           // normal：所在三角形的朝向（展示空间），积雪 / 置换按它决定方块往哪长
-          cells.set(key, { kind, distance, position: new THREE.Vector3(cx, cy, cz), uv: [u, v], local, normal: faceNormal.clone() });
+          // mesh：来自哪个网格（导入模型的非材质部件按它的原材质取色）
+          cells.set(key, { kind, mesh, distance, position: new THREE.Vector3(cx, cy, cz), uv: [u, v], local, normal: faceNormal.clone() });
         }
       }
     }
@@ -152,7 +153,7 @@ export function voxelize(meshes, relativeTo, resolution) {
 
   const result = { size, material: [], neutral: [] };
   for (const [key, cell] of cells) {
-    const voxel = { position: cell.position, uv: cell.uv, local: cell.local, normal: cell.normal, ao: neighborAo(cells, key, dims) };
+    const voxel = { position: cell.position, uv: cell.uv, local: cell.local, normal: cell.normal, mesh: cell.mesh, ao: neighborAo(cells, key, dims) };
     result[cell.kind].push(voxel);
   }
   return result;

@@ -206,18 +206,30 @@ export function computeOutlineNormals(geometry) {
   const sums = new Map();
   const keyOf = (i) =>
     `${Math.round(position.getX(i) * 1e4)},${Math.round(position.getY(i) * 1e4)},${Math.round(position.getZ(i) * 1e4)}`;
+  // 同一位置的顶点分组；只平均和自己同一侧的法线——导入模型常见正反两面重叠的薄片（车身面板），
+  // 正反法线一平均就抵消成随机方向，积雪 / 置换 / 描边会把它顶成碎片
   const n = new THREE.Vector3();
+  const m = new THREE.Vector3();
+  const keys = new Array(position.count);
   for (let i = 0; i < position.count; i += 1) {
     const key = keyOf(i);
-    const sum = sums.get(key) || new THREE.Vector3();
-    sum.add(n.fromBufferAttribute(normal, i));
-    sums.set(key, sum);
+    keys[i] = key;
+    const group = sums.get(key) || [];
+    group.push(i);
+    sums.set(key, group);
   }
   const out = new Float32Array(position.count * 3);
+  const sum = new THREE.Vector3();
   for (let i = 0; i < position.count; i += 1) {
-    const sum = sums.get(keyOf(i));
-    n.copy(sum).normalize();
-    out.set([n.x, n.y, n.z], i * 3);
+    n.fromBufferAttribute(normal, i);
+    sum.set(0, 0, 0);
+    for (const j of sums.get(keys[i])) {
+      m.fromBufferAttribute(normal, j);
+      if (m.dot(n) > 0) sum.add(m);
+    }
+    if (sum.lengthSq() < 1e-12) sum.copy(n);
+    sum.normalize();
+    out.set([sum.x, sum.y, sum.z], i * 3);
   }
   geometry.setAttribute("outlineNormal", new THREE.BufferAttribute(out, 3));
 }

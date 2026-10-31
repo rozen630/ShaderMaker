@@ -16,6 +16,13 @@
 - **AI 工具**：`read_effect` / `write_effect` / `delete_effect`；`set_look.effect` 切换、调参数、模拟点击、停在某一刻截图。页面输入框说效果名也能切换。
 - 自定义 Shader 和效果共用本机存储（`src/store.js`）。
 
+**🚗 导入自己的模型（GLB）**
+- 面板「导入模型」或直接拖到画面上；存在本机浏览器，下次打开还在。
+- 按原材质分部件：勾选的部件换成 ShaderMaker 材质并参与效果，其余保留原材质（卡通模式自动转卡通材质，体素按原色）。默认选名字像车身漆面的部件，没有就选外观上看得到最多的。
+- 通用处理：拆多材质网格、补法线、缩放取景、按长边细分；修好正反两面重叠的薄片（车身面板）被积雪 / 置换顶成碎片的问题。
+- Draco / meshopt / KTX2 压缩的模型会提示先解压。
+- AI：`import_model`（HTTPS 地址）、`delete_model`，`set_look` 的 `displayModel` / `modelParts`。
+
 ---
 
 ## 🤖 1.6.0 · AI 写 Shader，插件包瘦身

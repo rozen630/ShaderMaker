@@ -126,6 +126,23 @@ async function handle(msg) {
     }
     return { ok: true, result: written };
   }
+  if (msg.tool === 'import_model') {
+    // 下载进 Cindy 媒体库（GLB 是受支持的媒体类型，字节不经过沙箱），页面再从同源的 /media/ 读
+    const fetched = await cindy.fetch({ url: String(args.url || ''), as: 'media', timeoutMs: 300000, label: 'ShaderMaker 模型', callId: msg.callId });
+    if (!fetched || !fetched.ok) {
+      return { ok: false, errorCode: 'DOWNLOAD_FAILED', message: '下载失败：' + ((fetched && fetched.message) || '未知原因') };
+    }
+    if (!fetched.media) {
+      return { ok: false, errorCode: 'NOT_A_MODEL', message: '下载到的不是 GLB 模型（HTTP ' + fetched.status + '）' };
+    }
+    const hash = fetched.media.hash;
+    const ext = String(fetched.media.ext || 'glb').replace(/^\./, '');
+    const urls = ['/media/' + hash + '.' + ext, '/media/' + hash + ext];
+    return { ok: true, result: await ask(page, 'importModel', { urls: urls, name: args.name }, 120000) };
+  }
+  if (msg.tool === 'delete_model') {
+    return { ok: true, result: await ask(page, 'deleteModel', { id: args.id }, 15000) };
+  }
   if (msg.tool === 'read_effect') {
     return { ok: true, result: await ask(page, 'readEffect', args, 15000) };
   }

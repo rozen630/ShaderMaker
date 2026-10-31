@@ -1,9 +1,9 @@
 // 本机浏览器存储（IndexedDB）：自定义 Shader 和自定义效果都存在这里，主视图和任务页同源共用。
 // 只在这台电脑上，换电脑不会跟过去；想长期保留就把定义收进仓库（见 README）。
 const DB_NAME = "shadermaker";
-// v1：customShaders；v2：加 effects
-const DB_VERSION = 2;
-const STORES = ["customShaders", "effects"];
+// v1：customShaders；v2：加 effects；v3：加 models（导入模型的名称 / 部件设置）和 modelData（模型文件字节，按需读取）
+const DB_VERSION = 3;
+const STORES = ["customShaders", "effects", "models", "modelData"];
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -43,4 +43,5 @@ export async function loadAll(storeName) {
 }
 
 export const saveRecord = (storeName, record) => withStore(storeName, "readwrite", (store) => store.put(record));
+export const loadRecord = (storeName, id) => withStore(storeName, "readonly", (store) => store.get(id));
 export const removeRecord = (storeName, id) => withStore(storeName, "readwrite", (store) => store.delete(id));

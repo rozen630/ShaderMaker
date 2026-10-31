@@ -93,8 +93,17 @@
   <aside class="panel panel-inspector">
     <div class="panel-scroll">
       <section class="section">
-        <h2>展示模型</h2>
+        <div class="section-head">
+          <h2>展示模型</h2>
+          <button id="model-import" type="button" class="text-button" title="导入 GLB / glTF 模型，也可以直接拖到画面上">导入模型</button>
+          <input id="model-file" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" hidden />
+        </div>
         <div id="shape-modes" class="segmented segmented-fill"></div>
+        <div id="imported-models" class="chips imported-models"></div>
+        <div id="model-parts-section" class="model-parts" hidden>
+          <div class="row"><span>套用材质的部件</span><button id="model-delete" type="button" class="text-button">删除模型</button></div>
+          <div id="model-parts" class="chips"></div>
+        </div>
       </section>
 
       <section class="section">

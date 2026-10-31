@@ -58,8 +58,12 @@ export function buildManifest(catalog, version) {
             },
             displayModel: {
               type: "string",
-              enum: catalog.displayModels.map((item) => item.id),
-              description: `展示模型：${list(catalog.displayModels)}`,
+              description: `展示模型：${list(catalog.displayModels)}；也可以是导入模型的 id 或名字（状态里的 model.importedModels）`,
+            },
+            modelParts: {
+              type: "array",
+              items: { type: "string" },
+              description: "导入模型里套用 ShaderMaker 材质的部件（部件 key 或名字，见状态里的 model.parts），其余部件保留原材质。效果（鳞片等实例、表面换色、形变）只作用在这些部件上",
             },
             voxel: { type: "boolean", description: "体素化开关（Teardown 式方块效果）" },
             voxelResolution: {
@@ -165,6 +169,24 @@ export function buildManifest(catalog, version) {
           },
           required: ["id", "code"],
         },
+      },
+      {
+        name: "import_model",
+        description:
+          "从一个 HTTPS 地址导入 GLB 模型到 ShaderMaker（经 Cindy 下载进媒体库，再在页面里解析），存到这台电脑的浏览器存储并切换过去。返回模型的部件列表：默认面积最大的部件套用 ShaderMaker 材质，可用 set_look 的 modelParts 改。只支持单文件 GLB（不支持 Draco / meshopt 压缩和 KTX2 贴图），上限 200 MB。用户本机上的文件请让用户点面板「导入模型」或直接拖到画面上。会联网下载该地址。",
+        parameters: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "GLB 文件的 HTTPS 地址" },
+            name: { type: "string", description: "显示名称，可省略" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "delete_model",
+        description: "删除一个导入的模型（内置的 Shader Ball / 球 / 方块不能删），从这台电脑的浏览器存储里移除。",
+        parameters: { type: "object", properties: { id: { type: "string", description: "导入模型的 id" } }, required: ["id"] },
       },
       {
         name: "read_effect",

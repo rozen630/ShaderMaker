@@ -21,7 +21,15 @@ import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 import { createStylizer, styles, defaultStyle, MASK_LAYER } from "./stylize.js";
 import { createNpr, nprPresets, nprSliders, defaultNprPreset } from "./npr.js";
-import { displayModels, defaultDisplayModel, loadDisplayModel, calibrationColor } from "./models.js";
+import {
+  displayModels,
+  defaultDisplayModel,
+  loadDisplayModel,
+  calibrationColor,
+  assignParts,
+  forgetDisplayModel,
+  measureExposure,
+} from "./models.js";
 import { voxelResolution, voxelPresets, applyVoxelSupport, voxelize, buildVoxelMesh } from "./voxel.js";
 import {
   applyTriplanar,
@@ -47,7 +55,7 @@ import {
   formatEffectErrors,
 } from "./effects.js";
 import { effectExamples } from "./effectExamples.js";
-import { loadAll, saveRecord, removeRecord } from "./store.js";
+import { loadAll, saveRecord, removeRecord, loadRecord } from "./store.js";
 
 const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
@@ -699,7 +707,10 @@ function refreshRenderState() {
   // 体素化时实例根部埋在方块里、通道查看只看贴图，都不画实例（overlay 照常）
   instanceLayer.setHidden(debug || state.voxelOn);
   // 校色件（内芯色环、灰底盘）是参照物，任何模式下都保持写实
-  for (const mesh of displayParts.neutralMeshes) mesh.material = mesh.userData.pbrMaterial;
+  // 导入模型保留原材质的部件：卡通模式用一份按原材质转出来的卡通材质
+  for (const mesh of displayParts.neutralMeshes) {
+    mesh.material = nprOn && mesh.userData.originalMaterial && !debug ? toonFor(mesh.userData.originalMaterial) : mesh.userData.pbrMaterial;
+  }
   for (const mesh of voxelGroup?.children || []) {
     mesh.material = mesh.userData.voxelKind === "material" ? subjectMaterial : voxelNeutralMaterial;
   }
@@ -736,7 +747,7 @@ function applyVoxel() {
   const on = state.voxelOn && Boolean(displayParts.root);
   for (const mesh of [...displayParts.materialMeshes, ...displayParts.neutralMeshes]) mesh.visible = !on;
   if (on) {
-    const key = `${state.displayModel}:${state.voxelRes}`;
+    const key = `${state.displayModel}:${enabledPartKeys().join(",")}:${state.voxelRes}`;
     let built = voxelCache.get(key);
     if (built) {
       voxelCache.delete(key);
@@ -755,7 +766,9 @@ function applyVoxel() {
         built.add(mesh);
       }
       if (data.neutral.length) {
-        const mesh = buildVoxelMesh(data.neutral, data.size, voxelNeutralMaterial, (voxel) => calibrationColor(voxel.local));
+        // 导入模型的非材质部件按原材质颜色，Shader Ball 的校色件按色环规则
+        const colorOf = (voxel) => voxel.mesh?.userData.voxelColor?.clone() || calibrationColor(voxel.local);
+        const mesh = buildVoxelMesh(data.neutral, data.size, voxelNeutralMaterial, colorOf);
         mesh.userData.voxelKind = "neutral";
         built.add(mesh);
       }
@@ -1037,7 +1050,7 @@ function initEffects() {
 let displayToken = 0;
 
 async function setDisplayModel(id) {
-  const def = displayModels[id] || displayModels[defaultDisplayModel];
+  const def = modelDef(id);
   const token = ++displayToken;
   setCompileState(true, "loading");
   let parts;
@@ -1050,13 +1063,21 @@ async function setDisplayModel(id) {
     return;
   }
   if (token !== displayToken) return;
+  displayDef = def;
+  state.displayModel = def.id;
+  mountDisplayParts(parts);
+  renderModelParts();
+  setCompileState(true, "ready");
+}
+
+// 把（新的或重新分过部件的）模型挂进场景：描边、阴影、实例散布、体素、取景都按当前部件重建
+function mountDisplayParts(parts) {
+  const def = displayDef;
   if (displayParts.root) {
     npr.removeOutlines((target) => target.userData.display === true);
     display.remove(displayParts.root);
   }
   displayParts = parts;
-  displayDef = def;
-  state.displayModel = def.id;
   for (const mesh of [...parts.materialMeshes, ...parts.neutralMeshes]) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -1081,22 +1102,251 @@ async function setDisplayModel(id) {
   refreshRenderState();
   highlightDisplayModel();
   requestViewportSync(false);
-  setCompileState(true, "ready");
+}
+
+// ---- 导入的模型：本机浏览器存储里只放名称 / 部件设置（models）和文件字节（modelData，用到时才读） ----
+
+const importedModels = new Map();
+const MAX_IMPORT_BYTES = 200 * 1024 * 1024;
+const PAINT_NAMES = /paint|body|carpaint|exterior|shell|车身|车漆|漆面|外壳/i;
+const importedRoot = document.getElementById("imported-models");
+const partsSection = document.getElementById("model-parts-section");
+const partsRoot = document.getElementById("model-parts");
+const toonCache = new WeakMap();
+
+function modelDef(id) {
+  if (displayModels[id]) return displayModels[id];
+  const meta = importedModels.get(id);
+  if (!meta) return displayModels[defaultDisplayModel];
+  return {
+    id,
+    label: meta.name,
+    imported: true,
+    parts: meta.parts,
+    load: async () => {
+      const record = await loadRecord("modelData", id);
+      if (!record?.data) throw new Error("模型文件不在本机存储里了");
+      return record.data;
+    },
+  };
+}
+
+function enabledPartKeys() {
+  return (displayParts.parts || []).filter((part) => part.enabled).map((part) => part.key);
+}
+
+// 原材质 → 卡通材质（颜色 / 贴图 / 透明度照搬，粗糙度和金属度走 NPR 的转换规则）
+function toonFor(material) {
+  if (toonCache.has(material)) return toonCache.get(material);
+  const toon = npr.makeMaterial({
+    color: material.color ? material.color.clone() : 0xffffff,
+    map: material.map || null,
+    transparent: material.transparent,
+    opacity: material.opacity ?? 1,
+    side: material.side,
+  });
+  npr.applyPhysical(toon, {
+    uRoughness: material.roughness ?? 0.6,
+    uMetalness: material.metalness ?? 0,
+    uClearcoat: material.clearcoat ?? 0,
+    uClearcoatRoughness: material.clearcoatRoughness ?? 0.3,
+    uSheen: 0,
+    uSheenColor: [1, 1, 1],
+    uTransmission: material.transmission ?? 0,
+    uAttenuationColor: [1, 1, 1],
+    uIridescence: 0,
+    uDispersion: 0,
+  });
+  toon.opacity = material.transmission ? 0.35 : material.opacity ?? 1;
+  toon.transparent = toon.opacity < 1;
+  toonCache.set(material, toon);
+  return toon;
+}
+
+function renderImportedModels() {
+  if (!importedRoot) return;
+  importedRoot.innerHTML = "";
+  for (const meta of importedModels.values()) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chip";
+    button.dataset.model = meta.id;
+    button.textContent = meta.name;
+    button.title = `${meta.name} · ${(meta.bytes / 1048576).toFixed(1)} MB`;
+    button.addEventListener("click", () => {
+      setDisplayModel(meta.id);
+      logEl.textContent = `展示模型：${meta.name}`;
+    });
+    importedRoot.append(button);
+  }
+  highlightDisplayModel();
+}
+
+function renderModelParts() {
+  if (!partsSection || !partsRoot) return;
+  partsSection.hidden = !displayParts.imported;
+  partsRoot.innerHTML = "";
+  if (!displayParts.imported) return;
+  for (const part of displayParts.parts) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chip";
+    button.textContent = part.label;
+    button.title = `面积占 ${Math.round((part.area / displayParts.totalArea) * 100)}%${part.exposure !== undefined ? `，外观可见 ${Math.round(part.exposure * 100)}%` : ""}`;
+    button.classList.toggle("active", part.enabled);
+    button.addEventListener("click", () => {
+      const keys = new Set(enabledPartKeys());
+      if (keys.has(part.key)) keys.delete(part.key);
+      else keys.add(part.key);
+      setModelParts([...keys]);
+    });
+    partsRoot.append(button);
+  }
+}
+
+// 改哪些部件套用 ShaderMaker 材质（至少留一个）
+async function setModelParts(keys) {
+  if (!displayParts.imported) return null;
+  const valid = keys.filter((key) => displayParts.parts.some((part) => part.key === key));
+  if (!valid.length) {
+    logEl.textContent = "至少留一个部件套用材质";
+    return null;
+  }
+  assignParts(displayParts, valid);
+  mountDisplayParts(displayParts);
+  renderModelParts();
+  const meta = importedModels.get(state.displayModel);
+  if (meta) {
+    meta.parts = valid;
+    await saveRecord("models", meta);
+  }
+  return valid;
+}
+
+// 导入：检查大小 → 先试着解析（不合格不存）→ 存进本机 → 切过去
+async function importModel(data, name) {
+  if (!(data instanceof ArrayBuffer) || !data.byteLength) throw new Error("文件是空的");
+  if (data.byteLength > MAX_IMPORT_BYTES) throw new Error(`模型太大（上限 ${MAX_IMPORT_BYTES / 1048576} MB）`);
+  const id = `import-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const meta = { id, name: String(name || "导入模型").replace(/\.(glb|gltf)$/i, "").slice(0, 32), bytes: data.byteLength, parts: null, createdAt: Date.now() };
+  setCompileState(true, "loading");
+  const probe = { ...modelDef("missing"), id, label: meta.name, imported: true, parts: null, load: async () => data };
+  try {
+    // 默认套用材质的部件：从外面看得到最多的那个（车身，而不是面积更大的内饰）
+    // 名字像车身漆面的部件（常被拆成好几种材质）一起选上；没有就选从外面看得到最多的
+    const model = await loadDisplayModel(probe);
+    const best = measureExposure(model, renderer);
+    const painted = model.parts.filter((part) => PAINT_NAMES.test(part.label) && part.exposure > 0.02).map((part) => part.key);
+    meta.parts = painted.length ? painted : [best.key];
+    assignParts(model, meta.parts);
+  } catch (error) {
+    forgetDisplayModel(id);
+    setCompileState(false, "model error");
+    throw error;
+  }
+  await saveRecord("modelData", { id, data });
+  await saveRecord("models", meta);
+  importedModels.set(id, meta);
+  renderImportedModels();
+  modelChannel.postMessage({ type: "changed" });
+  await setDisplayModel(id);
+  const chosen = displayParts.parts.filter((part) => part.enabled).map((part) => part.label);
+  logEl.textContent = `已导入 ${meta.name}：${displayParts.parts.length} 个部件，「${chosen.join("、")}」套用材质`;
+  return { id, name: meta.name, parts: partsState() };
+}
+
+async function deleteModel(id) {
+  const meta = importedModels.get(id);
+  if (!meta) throw new Error(displayModels[id] ? "内置模型不能删除" : `没有这个导入模型：${id}`);
+  await removeRecord("models", id);
+  await removeRecord("modelData", id);
+  importedModels.delete(id);
+  forgetDisplayModel(id);
+  for (const key of [...voxelCache.keys()]) {
+    if (key.startsWith(`${id}:`)) {
+      disposeVoxelGroup(voxelCache.get(key));
+      voxelCache.delete(key);
+    }
+  }
+  modelChannel.postMessage({ type: "changed" });
+  renderImportedModels();
+  if (state.displayModel === id) await setDisplayModel(defaultDisplayModel);
+  logEl.textContent = `已删除模型：${meta.name}`;
+  return { deleted: id };
+}
+
+function partsState() {
+  return displayParts.imported ? displayParts.parts.map((part) => ({ key: part.key, label: part.label, enabled: part.enabled, area: round(part.area / displayParts.totalArea) })) : undefined;
+}
+
+const modelChannel = new BroadcastChannel("shadermaker-models");
+
+async function reloadImportedModels() {
+  importedModels.clear();
+  for (const meta of await loadAll("models")) importedModels.set(meta.id, meta);
+  renderImportedModels();
+  if (displayParts.imported && !importedModels.has(state.displayModel)) setDisplayModel(defaultDisplayModel);
+}
+
+async function importFile(file) {
+  if (!file) return;
+  try {
+    await importModel(await file.arrayBuffer(), file.name);
+  } catch (error) {
+    logEl.textContent = `导入失败：${error.message}`;
+    setCompileState(false, "model error");
+  }
+}
+
+function initModelImport() {
+  const fileInput = document.getElementById("model-file");
+  document.getElementById("model-import")?.addEventListener("click", () => fileInput?.click());
+  fileInput?.addEventListener("change", () => {
+    importFile(fileInput.files[0]);
+    fileInput.value = "";
+  });
+  document.getElementById("model-delete")?.addEventListener("click", () => {
+    deleteModel(state.displayModel).catch((error) => (logEl.textContent = error.message));
+  });
+  // 拖到画面上导入
+  const viewport = canvas.closest(".viewport") || document.body;
+  let depth = 0;
+  window.addEventListener("dragenter", (event) => {
+    if (![...(event.dataTransfer?.types || [])].includes("Files")) return;
+    depth += 1;
+    viewport.classList.add("drop-target");
+  });
+  window.addEventListener("dragleave", () => {
+    depth = Math.max(0, depth - 1);
+    if (!depth) viewport.classList.remove("drop-target");
+  });
+  window.addEventListener("dragover", (event) => event.preventDefault());
+  window.addEventListener("drop", (event) => {
+    event.preventDefault();
+    depth = 0;
+    viewport.classList.remove("drop-target");
+    const file = [...(event.dataTransfer?.files || [])].find((item) => /\.(glb|gltf)$/i.test(item.name));
+    if (file) importFile(file);
+    else if (event.dataTransfer?.files?.length) logEl.textContent = "只支持 .glb / .gltf 模型";
+  });
+  modelChannel.addEventListener("message", () => reloadImportedModels());
+  reloadImportedModels();
 }
 
 function updateViewBounds() {
   display.rotation.set(0, 0, 0);
   display.updateMatrixWorld(true);
   viewBounds.setFromObject(display);
-  // 所有模型共用 Shader Ball 大小的取景框，切换时相机不跳
-  viewBounds.union(new THREE.Box3(new THREE.Vector3(-0.8, 0, -0.8), new THREE.Vector3(0.8, 1.5, 0.8)));
+  // 内置模型共用 Shader Ball 大小的取景框，切换时相机不跳；导入的模型（比如扁长的车）按自己的大小取景
+  if (!displayParts.imported) viewBounds.union(new THREE.Box3(new THREE.Vector3(-0.8, 0, -0.8), new THREE.Vector3(0.8, 1.5, 0.8)));
   const radius = Math.max(Math.abs(viewBounds.min.x), Math.abs(viewBounds.max.x), Math.abs(viewBounds.min.z), Math.abs(viewBounds.max.z));
   viewBounds.min.set(-radius, 0, -radius);
   viewBounds.max.set(radius, viewBounds.max.y, radius);
 }
 
 function highlightDisplayModel() {
-  for (const button of shapeRoot?.querySelectorAll("[data-model]") || []) {
+  const buttons = [...(shapeRoot?.querySelectorAll("[data-model]") || []), ...(importedRoot?.querySelectorAll("[data-model]") || [])];
+  for (const button of buttons) {
     button.classList.toggle("active", button.dataset.model === state.displayModel);
   }
 }
@@ -1578,7 +1828,7 @@ shapeRoot?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-model]");
   if (!button) return;
   setDisplayModel(button.dataset.model);
-  logEl.textContent = `展示模型：${displayModels[button.dataset.model].label}`;
+  logEl.textContent = `展示模型：${modelDef(button.dataset.model).label}`;
 });
 
 renderModeRoot?.addEventListener("click", (event) => {
@@ -1695,6 +1945,7 @@ renderNprPresets();
 renderDisplayModels();
 initVoxelControls();
 initEffects();
+initModelImport();
 setStyle(defaultStyle);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
@@ -1746,6 +1997,13 @@ function getState() {
     scope: state.scope,
     environment: state.environment,
     displayModel: state.displayModel,
+    model: {
+      id: state.displayModel,
+      name: modelDef(state.displayModel).label,
+      imported: Boolean(displayParts.imported),
+      parts: partsState(),
+      importedModels: [...importedModels.values()].map((meta) => ({ id: meta.id, name: meta.name })),
+    },
     voxel: { on: state.voxelOn, resolution: state.voxelRes },
     effect: effectState(),
     colors: Object.fromEntries(colorKeys.map((key) => [key, rgbToHex(state.params[key])])),
@@ -1791,8 +2049,27 @@ async function setLook(look = {}) {
   }
   const environment = pick(look.environment, environments, "环境");
   if (environment) await setEnvironment(environment);
-  const model = pick(look.displayModel, displayModels, "展示模型");
-  if (model) await setDisplayModel(model);
+  // 展示模型：内置 id、导入模型的 id，或导入模型的名字
+  if (look.displayModel) {
+    const wanted = String(look.displayModel);
+    const imported = importedModels.get(wanted) || [...importedModels.values()].find((meta) => meta.name === wanted);
+    const model = displayModels[wanted] ? wanted : imported?.id;
+    if (model) await setDisplayModel(model);
+    else warnings.push(`未知的展示模型：${wanted}`);
+  }
+  // modelParts：导入模型里套用 ShaderMaker 材质的部件（key 或部件名的数组）
+  if (look.modelParts !== undefined) {
+    if (!displayParts.imported) warnings.push("当前不是导入的模型，modelParts 不生效");
+    else {
+      const keys = [];
+      for (const item of [].concat(look.modelParts)) {
+        const part = displayParts.parts.find((entry) => entry.key === item || entry.label === item);
+        if (part) keys.push(part.key);
+        else warnings.push(`没有这个部件：${item}`);
+      }
+      if (keys.length) await setModelParts(keys);
+    }
+  }
   if (look.voxel !== undefined || look.voxelResolution !== undefined) {
     setVoxel(look.voxel ?? true, look.voxelResolution ?? state.voxelRes);
   }
@@ -2125,4 +2402,22 @@ export const shaderMaker = {
   writeEffect,
   readEffect,
   deleteEffect,
+  // AI 导入：页面从插件的媒体库地址读模型文件（cindy-plugin/main.js 先用 cindy.fetch 下载进媒体库）
+  async importModelFrom({ urls = [], name } = {}) {
+    let lastError = "";
+    for (const url of urls) {
+      const response = await fetch(url).catch((error) => ({ ok: false, statusText: error.message }));
+      if (!response.ok) {
+        lastError = `${url}：${response.status || ""} ${response.statusText || ""}`;
+        continue;
+      }
+      const result = await importModel(await response.arrayBuffer(), name);
+      return { ...result, state: getState() };
+    }
+    throw new Error(`读不到下载好的模型文件（${lastError}）`);
+  },
+  async deleteModel({ id } = {}) {
+    const result = await deleteModel(String(id || ""));
+    return { ...result, state: getState() };
+  },
 };

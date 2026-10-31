@@ -66,22 +66,24 @@ function subdivide(geometry) {
   return result;
 }
 
-// 细分到平均边长不超过 targetEdge（模型自身坐标），三角形数上限约 40 万
-function densify(geometry, targetEdge) {
+// 细分到边长（取第 90 百分位，大块平面也算进去）不超过 targetEdge（模型自身坐标），三角形数不超过 maxTriangles（默认约 40 万）。
+// 只看平均边长的话，导入模型细节处的大量小三角会把平均拉低，大块车身面板就几乎不细分
+function densify(geometry, targetEdge, maxTriangles = 400000) {
   if (!geometry.index) geometry = mergeVertices(geometry);
   const position = geometry.attributes.position;
   const index = geometry.index.array;
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
-  let total = 0;
-  const samples = Math.min(index.length / 3, 2000);
+  const lengths = [];
+  const samples = Math.min(index.length / 3, 4000);
   const step = Math.max(1, Math.floor(index.length / 3 / samples));
   for (let t = 0; t < index.length; t += 3 * step) {
-    total += a.fromBufferAttribute(position, index[t]).distanceTo(b.fromBufferAttribute(position, index[t + 1]));
+    lengths.push(a.fromBufferAttribute(position, index[t]).distanceTo(b.fromBufferAttribute(position, index[t + 1])));
   }
-  const average = total / samples;
-  let levels = Math.max(0, Math.ceil(Math.log2(average / targetEdge)));
-  while (levels > 0 && (index.length / 3) * 4 ** levels > 400000) levels -= 1;
+  lengths.sort((x, y) => x - y);
+  const typical = lengths[Math.floor(lengths.length * 0.9)] || 0;
+  let levels = Math.max(0, Math.ceil(Math.log2(typical / targetEdge)));
+  while (levels > 0 && (index.length / 3) * 4 ** levels > maxTriangles) levels -= 1;
   for (let i = 0; i < levels; i += 1) geometry = subdivide(geometry);
   return geometry;
 }
@@ -228,9 +230,287 @@ async function buildShaderBall(def) {
   return { root: normalize(gltf.scene, def.height), materialMeshes, neutralMeshes };
 }
 
+// ---- 导入的模型（GLB / 自包含的 glTF） ----
+// 每种原材质算一个「部件」：勾选的部件换成 ShaderMaker 的材质（做细分、参与效果、体素按贴图取色），
+// 其余保留原材质。默认勾面积最大的部件（车就是车身）。
+
+// 需要解码器的扩展：插件页面不允许 wasm / 远程脚本，先说明怎么转换
+const UNSUPPORTED_EXTENSIONS = {
+  KHR_draco_mesh_compression: "Draco 网格压缩",
+  EXT_meshopt_compression: "meshopt 压缩",
+  KHR_texture_basisu: "KTX2 / Basis 贴图",
+};
+// 导入模型归一化后最长边的长度（Shader Ball 高 1.5、宽约 1.3）
+const IMPORT_SIZE = 1.9;
+// 换成 ShaderMaker 材质的部件细分后的三角形总数上限
+const IMPORT_TRIANGLE_BUDGET = 1500000;
+
+function gltfJson(data) {
+  const bytes = new Uint8Array(data);
+  const magic = String.fromCharCode(...bytes.subarray(0, 4));
+  if (magic === "glTF") {
+    const view = new DataView(data);
+    const length = view.getUint32(12, true);
+    return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + length)));
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new Error("不是 GLB / glTF 文件");
+  }
+}
+
+function checkImport(data) {
+  const json = gltfJson(data);
+  const used = [...new Set([...(json.extensionsRequired || []), ...(json.extensionsUsed || [])])];
+  const blocked = used.filter((name) => UNSUPPORTED_EXTENSIONS[name]).map((name) => UNSUPPORTED_EXTENSIONS[name]);
+  if (blocked.length) {
+    throw new Error(`模型用了${blocked.join("、")}，需要先解压：npx @gltf-transform/cli copy 输入.glb 输出.glb（去掉压缩）后再导入`);
+  }
+  const external = [...(json.buffers || []), ...(json.images || [])].find((item) => item.uri && !item.uri.startsWith("data:"));
+  if (external) throw new Error(`这个 glTF 引用了外部文件（${external.uri}），请导出成单个 .glb 再导入`);
+}
+
+// 多材质网格按材质拆成多个网格，之后一个网格只对应一个部件
+function splitByMaterial(mesh) {
+  if (!Array.isArray(mesh.material)) return [mesh];
+  const geometry = mesh.geometry.index ? mesh.geometry : mergeVertices(mesh.geometry);
+  const index = geometry.index.array;
+  const groups = geometry.groups.length ? geometry.groups : [{ start: 0, count: index.length, materialIndex: 0 }];
+  return groups.map((group) => {
+    const part = new THREE.BufferGeometry();
+    for (const [name, attribute] of Object.entries(geometry.attributes)) part.setAttribute(name, attribute);
+    part.setIndex(Array.from(index.subarray(group.start, group.start + group.count)));
+    const child = new THREE.Mesh(part, mesh.material[group.materialIndex] || mesh.material[0]);
+    child.name = `${mesh.name}#${group.materialIndex}`;
+    mesh.parent.add(child);
+    child.position.copy(mesh.position);
+    child.quaternion.copy(mesh.quaternion);
+    child.scale.copy(mesh.scale);
+    return child;
+  });
+}
+
+// 缩放到最长边 = size、XZ 居中、底部在 y = 0
+function normalizeFit(object, size) {
+  const box = new THREE.Box3().setFromObject(object);
+  const extent = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  object.position.set(-center.x, -box.min.y, -center.z);
+  const root = new THREE.Group();
+  root.add(object);
+  root.scale.setScalar(size / Math.max(extent.x, extent.y, extent.z, 1e-4));
+  root.updateMatrixWorld(true);
+  return root;
+}
+
+function meshArea(mesh) {
+  const position = mesh.geometry.attributes.position;
+  const index = mesh.geometry.index;
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const count = index ? index.count : position.count;
+  let area = 0;
+  for (let i = 0; i < count; i += 3) {
+    a.fromBufferAttribute(position, index ? index.getX(i) : i).applyMatrix4(mesh.matrixWorld);
+    b.fromBufferAttribute(position, index ? index.getX(i + 1) : i + 1).applyMatrix4(mesh.matrixWorld);
+    c.fromBufferAttribute(position, index ? index.getX(i + 2) : i + 2).applyMatrix4(mesh.matrixWorld);
+    area += b.sub(a).cross(c.sub(a)).length() * 0.5;
+  }
+  return area;
+}
+
+async function buildImported(def) {
+  const data = await def.load();
+  checkImport(data);
+  const gltf = await new GLTFLoader().parseAsync(data, "");
+  const scene = gltf.scene;
+  scene.updateMatrixWorld(true);
+  const found = [];
+  scene.traverse((child) => {
+    if (child.isMesh) found.push(child);
+  });
+  if (!found.length) throw new Error("模型里没有网格");
+  const meshes = [];
+  for (const mesh of found) {
+    const pieces = splitByMaterial(mesh);
+    if (pieces[0] !== mesh) mesh.removeFromParent();
+    meshes.push(...pieces);
+  }
+  // 几何可能被多个网格共用：先各自复制一份，后面的处理会改动几何
+  const seen = new Set();
+  for (const mesh of meshes) {
+    if (seen.has(mesh.geometry)) mesh.geometry = mesh.geometry.clone();
+    seen.add(mesh.geometry);
+    dequantize(mesh);
+    if (!mesh.geometry.index) mesh.geometry = mergeVertices(mesh.geometry);
+    if (!mesh.geometry.attributes.normal) mesh.geometry.computeVertexNormals();
+    mesh.userData.originalGeometry = mesh.geometry;
+    mesh.userData.originalMaterial = mesh.material;
+    mesh.userData.pbrMaterial = mesh.material;
+    mesh.userData.voxelColor = mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0.5, 0.5, 0.5);
+  }
+  const root = normalizeFit(scene, IMPORT_SIZE);
+  // 部件：按原材质分组，记面积（展示空间）
+  const parts = [];
+  const byMaterial = new Map();
+  let totalArea = 0;
+  for (const mesh of meshes) {
+    let part = byMaterial.get(mesh.material);
+    if (!part) {
+      part = { key: `p${parts.length}`, label: mesh.material.name || `部件 ${parts.length + 1}`, meshes: [], area: 0, enabled: false };
+      byMaterial.set(mesh.material, part);
+      parts.push(part);
+    }
+    mesh.userData.area = meshArea(mesh);
+    part.area += mesh.userData.area;
+    part.meshes.push(mesh);
+    totalArea += mesh.userData.area;
+  }
+  const model = { root, imported: true, parts, totalArea, materialMeshes: [], neutralMeshes: [] };
+  const largest = parts.reduce((best, part) => (part.area > best.area ? part : best), parts[0]);
+  assignParts(model, def.parts?.length ? def.parts : [largest.key]);
+  return model;
+}
+
+// 换成 ShaderMaker 材质的网格：细分（边长约 0.02 个展示单位，按面积分配三角形预算）、切线、描边法线
+function prepareMaterialGeometry(mesh, model) {
+  const scale = new THREE.Vector3().setFromMatrixScale(mesh.matrixWorld);
+  const localEdge = 0.02 / Math.max(scale.x, scale.y, scale.z, 1e-6);
+  const budget = Math.max(mesh.geometry.index.count / 3, (IMPORT_TRIANGLE_BUDGET * mesh.userData.area) / Math.max(model.totalArea, 1e-9));
+  const geometry = densify(mesh.userData.originalGeometry, localEdge, Math.min(budget, 400000));
+  if (geometry.attributes.uv && geometry.attributes.normal) {
+    try {
+      geometry.computeTangents();
+    } catch {
+      // 退化三角形算不出切线：法线贴图走三向投影，不影响
+    }
+  }
+  computeOutlineNormals(geometry);
+  computeEdgeLengths(geometry, Math.max(scale.x, scale.y, scale.z));
+  mesh.userData.denseGeometry = geometry;
+}
+
+// 每个顶点最长的相邻边（展示空间单位），存成 fxEdge：三角形太大的地方，积雪 / 置换的顶点外推自动减弱，
+// 否则比三角形还细的起伏会把大三角形顶成尖刺（materialFx.js）。内置模型细分足够细，不需要
+function computeEdgeLengths(geometry, scale) {
+  const position = geometry.attributes.position;
+  const index = geometry.index.array;
+  const edges = new Float32Array(position.count);
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  for (let t = 0; t < index.length; t += 3) {
+    for (let k = 0; k < 3; k += 1) {
+      const i = index[t + k];
+      const j = index[t + ((k + 1) % 3)];
+      const length = a.fromBufferAttribute(position, i).distanceTo(b.fromBufferAttribute(position, j)) * scale;
+      if (length > edges[i]) edges[i] = length;
+      if (length > edges[j]) edges[j] = length;
+    }
+  }
+  // 同一位置的顶点（UV 接缝处的重复顶点）取同一个值，否则减弱程度不同会裂开
+  const keyOf = (i) => `${Math.round(position.getX(i) * 1e4)},${Math.round(position.getY(i) * 1e4)},${Math.round(position.getZ(i) * 1e4)}`;
+  const shared = new Map();
+  for (let i = 0; i < position.count; i += 1) shared.set(keyOf(i), Math.max(shared.get(keyOf(i)) || 0, edges[i]));
+  for (let i = 0; i < position.count; i += 1) edges[i] = shared.get(keyOf(i));
+  geometry.setAttribute("fxEdge", new THREE.BufferAttribute(edges, 1));
+}
+
+// enabled：换成 ShaderMaker 材质的部件 key
+export function assignParts(model, enabled) {
+  const valid = enabled.filter((key) => model.parts.some((part) => part.key === key));
+  const keys = valid.length ? valid : [model.parts[0].key];
+  model.materialMeshes = [];
+  model.neutralMeshes = [];
+  for (const part of model.parts) {
+    part.enabled = keys.includes(part.key);
+    for (const mesh of part.meshes) {
+      if (part.enabled) {
+        if (!mesh.userData.denseGeometry) prepareMaterialGeometry(mesh, model);
+        mesh.geometry = mesh.userData.denseGeometry;
+        mesh.userData.voxelGeometry = mesh.userData.originalGeometry;
+        model.materialMeshes.push(mesh);
+      } else {
+        mesh.geometry = mesh.userData.originalGeometry;
+        mesh.material = mesh.userData.originalMaterial;
+        model.neutralMeshes.push(mesh);
+      }
+    }
+  }
+  return model;
+}
+
+// 从外面看得到多少：每个部件涂一种编号色，从 14 个方向各渲染一张小图，数各部件占的像素。
+// 车内饰面积大但被车身挡住，按这个挑「默认套用材质的部件」才会挑到车身。结果写进 part.exposure（0–1）
+export function measureExposure(model, renderer) {
+  const scene = new THREE.Scene();
+  const parent = model.root.parent;
+  scene.add(model.root);
+  const saved = new Map();
+  model.parts.forEach((part, index) => {
+    const material = new THREE.MeshBasicMaterial({ color: new THREE.Color().setHex(index + 1, THREE.LinearSRGBColorSpace), side: THREE.DoubleSide });
+    for (const mesh of part.meshes) {
+      saved.set(mesh, mesh.material);
+      mesh.material = material;
+    }
+  });
+  const box = new THREE.Box3().setFromObject(model.root);
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const camera = new THREE.OrthographicCamera(-sphere.radius, sphere.radius, sphere.radius, -sphere.radius, 0.01, sphere.radius * 4);
+  const size = 128;
+  const target = new THREE.WebGLRenderTarget(size, size);
+  const pixels = new Uint8Array(size * size * 4);
+  const counts = new Array(model.parts.length).fill(0);
+  const previousTarget = renderer.getRenderTarget();
+  const previousColor = renderer.getClearColor(new THREE.Color());
+  const previousAlpha = renderer.getClearAlpha();
+  const previousTone = renderer.toneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.setClearColor(0x000000, 1);
+  const directions = [];
+  for (const x of [-1, 0, 1]) for (const y of [-1, 0, 1]) for (const z of [-1, 0, 1]) {
+    if ((x || y || z) && Math.abs(x) + Math.abs(y) + Math.abs(z) !== 2) directions.push(new THREE.Vector3(x, y, z).normalize());
+  }
+  try {
+    for (const direction of directions) {
+      camera.position.copy(sphere.center).addScaledVector(direction, sphere.radius * 2);
+      camera.lookAt(sphere.center);
+      renderer.setRenderTarget(target);
+      renderer.clear();
+      renderer.render(scene, camera);
+      renderer.readRenderTargetPixels(target, 0, 0, size, size, pixels);
+      for (let i = 0; i < pixels.length; i += 4) {
+        const id = (pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2];
+        if (id > 0 && id <= counts.length) counts[id - 1] += 1;
+      }
+    }
+  } finally {
+    renderer.setRenderTarget(previousTarget);
+    renderer.setClearColor(previousColor, previousAlpha);
+    renderer.toneMapping = previousTone;
+    target.dispose();
+    for (const [mesh, material] of saved) mesh.material = material;
+    scene.remove(model.root);
+    if (parent) parent.add(model.root);
+  }
+  const total = counts.reduce((sum, value) => sum + value, 0) || 1;
+  model.parts.forEach((part, index) => (part.exposure = counts[index] / total));
+  return model.parts.reduce((best, part) => (part.exposure > best.exposure ? part : best), model.parts[0]);
+}
+
 const cache = new Map();
 
 export function loadDisplayModel(def) {
-  if (!cache.has(def.id)) cache.set(def.id, def.url ? buildShaderBall(def) : Promise.resolve(buildPrimitive(def)));
+  if (!cache.has(def.id)) {
+    const build = def.load ? buildImported(def) : def.url ? buildShaderBall(def) : Promise.resolve(buildPrimitive(def));
+    // 失败的不缓存，下次重新加载
+    build.catch(() => cache.delete(def.id));
+    cache.set(def.id, build);
+  }
   return cache.get(def.id);
+}
+
+export function forgetDisplayModel(id) {
+  cache.delete(id);
 }
