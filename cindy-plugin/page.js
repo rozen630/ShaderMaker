@@ -14,6 +14,7 @@ const handlers = {
   snapshot: (payload) => shaderMaker.snapshot(payload.maxSize),
   writeShader: (payload) => shaderMaker.writeShader(payload),
   readShader: (payload) => shaderMaker.readShader(payload),
+  exportShader: (payload) => shaderMaker.exportShader({ include_compiled: payload.include_compiled }),
   deleteShader: (payload) => shaderMaker.deleteShader(payload),
   writeEffect: (payload) => shaderMaker.writeEffect(payload),
   readEffect: (payload) => shaderMaker.readEffect(payload),

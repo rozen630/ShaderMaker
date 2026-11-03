@@ -1872,8 +1872,6 @@ function syncViewport(resetOrbit = false) {
   const bounds = viewBounds;
   const size = bounds.getSize(new THREE.Vector3());
   const center = bounds.getCenter(new THREE.Vector3());
-  // 视口底部有输入框，取景中心往下挪一点，模型显示得靠上
-  center.y -= size.y * 0.14;
   const maxSize = Math.max(size.x, size.y, size.z);
   const vFit = maxSize / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
   const distance = Math.max(vFit, vFit / Math.max(aspect, 0.35)) * 2.05;
@@ -2267,6 +2265,74 @@ function readShader(input = {}) {
   };
 }
 
+// 导出当前材质的 GLSL、参数和正在使用的效果，供从聊天复制并移植到其它引擎。
+function exportShader(options = {}) {
+  const definition = shaders[state.shader];
+  if (!definition) throw new Error("当前材质没有可导出的 Shader：" + state.shader);
+
+  const currentState = getState();
+  const material = currentState.material;
+  const effect = activeEffect();
+  const activeInAppearance = state.mode === "shader" || state.params.useMaps !== false;
+  const requestedCompiled = options.include_compiled ?? options.includeCompiled;
+  const includeCompiled = requestedCompiled === undefined ? !activeInAppearance : Boolean(requestedCompiled);
+  const result = {
+    format: "shadermaker-shader-export-v1",
+    material,
+    colors: currentState.colors,
+    render: state.render,
+    parameters: JSON.parse(JSON.stringify(state.params)),
+    shader: {
+      id: state.shader,
+      name: definition.name,
+      kind: definition.kind || "lookdev",
+      activeInAppearance,
+      codeType: definition.source ? "shadermaker-authored-glsl" : "complete-fragment-glsl",
+      code: definition.source || definition.fragment,
+      channelContract: definition.kind === "surface"
+        ? {
+            baseColor: "grade(SurfaceData.baseColor)",
+            emissive: "grade(SurfaceData.emissive)",
+            orm: "ambient occlusion, roughness, metalness, and remapped height",
+            normal: "derived from the height field",
+          }
+        : undefined,
+    },
+    effect: effect
+      ? (() => {
+          const { keys, createdAt, updatedAt, ...record } = effect;
+          return {
+            ...record,
+            values: Object.fromEntries(record.params.map((param) => [param.key, effectParamValue(param.key)])),
+          };
+        })()
+      : null,
+    notes: [
+      activeInAppearance
+        ? "shader.code is the current material's GLSL texture-generation source; ShaderMaker helper functions and uniforms are part of its source contract."
+        : "This standard PBR material has no active procedural texture shader; shader.code is the stored lookdev fragment. Set include_compiled to export the rendered material program.",
+      "For surface shaders, sampleSurface returns base color, emissive, AO, roughness, metalness, and height; channelContract describes how ShaderMaker maps those fields.",
+      "effect contains the active overlay, deformation, or instance shader code and its current parameter values.",
+      includeCompiled
+        ? "compiledMaterialShader contains the current Three.js-generated material program; adapt its renderer-specific symbols and uniforms for another engine."
+        : "Final PBR lighting, environment reflections, and NPR lighting come from the renderer; set include_compiled to include the current Three.js material program.",
+    ],
+  };
+
+  if (includeCompiled) {
+    const materialSource = state.render === "npr" ? nprSubjectMaterial : cubeMaterial;
+    const properties = renderer.properties?.get(materialSource);
+    const program = properties?.currentProgram || [...(properties?.programs?.values?.() || [])][0];
+    const gl = renderer.getContext();
+    const vertex = program?.vertexShader ? gl.getShaderSource(program.vertexShader) : null;
+    const fragment = program?.fragmentShader ? gl.getShaderSource(program.fragmentShader) : null;
+    result.compiledMaterialShader = vertex && fragment ? { vertex, fragment } : null;
+    if (!result.compiledMaterialShader) result.notes.push("The current Three.js material program has not compiled yet; compiledMaterialShader is null.");
+  }
+
+  return result;
+}
+
 async function deleteShader(input = {}) {
   const id = String(input.id || "").trim();
   if (!customRecords.has(id)) throw new Error(builtinShaderIds.has(id) ? "内置 Shader 不能删除" : `没有这个自定义 Shader：${id}`);
@@ -2398,6 +2464,7 @@ export const shaderMaker = {
   snapshot,
   writeShader,
   readShader,
+  exportShader,
   deleteShader,
   writeEffect,
   readEffect,
