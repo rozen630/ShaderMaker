@@ -116,6 +116,9 @@ async function handle(msg) {
   if (msg.tool === 'read_shader') {
     return { ok: true, result: await ask(page, 'readShader', args, 15000) };
   }
+  if (msg.tool === 'export_shader') {
+    return { ok: true, result: await ask(page, 'exportShader', args, 30000) };
+  }
   if (msg.tool === 'delete_shader') {
     return { ok: true, result: await ask(page, 'deleteShader', args, 15000) };
   }

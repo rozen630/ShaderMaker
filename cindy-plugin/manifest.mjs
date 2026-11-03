@@ -14,7 +14,7 @@ export function buildManifest(catalog, version) {
     name: "ShaderMaker",
     description: "材质与 Shader 预览工作台：PBR 材质库、程序化 Shader、NPR 卡通渲染、画面滤镜和 Teardown 式体素化，可导入自己的 GLB 模型；AI 可以直接写 GLSL 新增自定义 Shader，以及套在模型上的可编程效果（表面、形变、实例几何，响应点击 / 指针）。",
     whenToUse:
-      "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，或想看材质在不同环境光下的渲染结果，或想让 AI 写一个新的程序化材质 / Shader 效果、或模型上的动态效果（点击扩散、鳞片 / 羽毛 / 草等实例几何、形变）时找我",
+      "需要预览或调整材质球、PBR 材质、程序化 Shader 效果、NPR 卡通渲染、描边、画面滤镜（像素/漫画/油画等）、体素化效果，想导出当前材质的 GLSL 源码并迁移到其它引擎，或想让 AI 写一个新的程序化材质 / Shader 效果、或模型上的动态效果（点击扩散、鳞片 / 羽毛 / 草等实例几何、形变）时找我",
     version,
     entry: "main.js",
     icon: "assets/icon.png",
@@ -108,7 +108,7 @@ export function buildManifest(catalog, version) {
       {
         name: "describe_look",
         description:
-          "用一句自然语言调整 ShaderMaker 页面，等同于在页面输入框里输入（例如「生锈的铜，卡通描边，体素粗一点」）。返回页面的解析说明与调整后的完整状态。没有打开的 ShaderMaker 页面时会自动在当前任务右侧栏打开（首次需加载几秒）。",
+          "根据 Cindy 对话中的一句自然语言调整 ShaderMaker 页面（例如「生锈的铜，卡通描边，体素粗一点」）。返回页面的解析说明与调整后的完整状态。没有打开的 ShaderMaker 页面时会自动在当前任务右侧栏打开（首次需加载几秒）。",
         parameters: {
           type: "object",
           properties: {
@@ -136,6 +136,17 @@ export function buildManifest(catalog, version) {
           type: "object",
           properties: {
             id: { type: "string", description: "Shader 或材质预设的 id（例如 snow、stylizedBrick、ice、nebula）；传 library 返回可平铺函数库全部函数的签名和返回值说明；不传则返回写法说明和列表" },
+          },
+        },
+      },
+      {
+        name: "export_shader",
+        description:
+          "导出当前材质的 ShaderMaker GLSL 源码、当前材质参数，以及正在使用的效果代码和参数，供用户在聊天中复制并适配到其它引擎。请把返回的 GLSL 代码放进聊天代码块中发送，不要只回复材质名称。可选 include_compiled=true 会附上当前 Three.js 材质的实际顶点 / 片元 Shader（体积较大，且依赖 Three.js）；没有启用程序化贴图源码的标准 PBR 材质会默认附上这份编译源码。默认导出便于移植的源代码层；不会修改页面。没有打开的 ShaderMaker 页面时会自动在当前任务右侧栏打开。",
+        parameters: {
+          type: "object",
+          properties: {
+            include_compiled: { type: "boolean", description: "是否额外包含 Three.js 当前编译出的顶点和片元 GLSL；默认 false" },
           },
         },
       },

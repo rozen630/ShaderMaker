@@ -30,14 +30,14 @@
 python3 serve.py          # → http://127.0.0.1:5173（禁用缓存，改完刷新即生效）
 ```
 
-然后在底部输入框直接说：
+将 Cindy 插件打包并导入后，在 Cindy 聊天里直接说：
 
 ```
 换成科幻面板          改成锈铁，二次元          赛璐璐，描边粗一点
 厚涂，暖色阴影        像素风                    teardown，体素更粗
 ```
 
-解析在浏览器本地完成，不依赖后端。Three.js `r170` 走 unpkg CDN，仓库不托管 `vendor/`。
+网页用于预览和手动调节；自然语言操作与效果触发通过 Cindy 聊天完成。Three.js `r170` 走 unpkg CDN，仓库不托管 `vendor/`。
 
 > 🧩 也可以装成 **Cindy 插件**，让对话里的 AI 直接替你调材质、截图检查，见 [Cindy 插件](#-cindy-插件)。
 
@@ -246,13 +246,15 @@ npm run build:plugin      # → dist/cindy-plugin/
 ```
 
 然后用 Cindy 的 `ghost_forge_pack` 打包 `dist/cindy-plugin/`，得到 `shadermaker-<版本>.cindy`，导入即可。
+每个 GitHub Release 也会附上对应版本的 `.cindy` 安装包。
 
 | AI 工具 | 作用 |
 |---|---|
 | `set_look` | 精确设置材质、PBR / NPR、NPR 预设、滤镜与强度、作用范围、环境、展示模型、体素与精细度、材质参数、三色、NPR 参数，返回完整状态 |
-| `describe_look` | 一句话调整，等同于页面输入框（复用 `src/nl.js`） |
+| `describe_look` | 解析 Cindy 聊天里的一句话调整（复用 `src/nl.js`） |
 | `snapshot` | 截取当前画面给 AI 看，方便它边调边检查 |
 | `read_shader` | 不传 id：自定义 Shader 写法说明 + 全部 Shader 列表；传 id：某个 Shader 的 GLSL 源码当模板；`library`：可平铺函数库的全部签名和返回值 |
+| `export_shader` | 将当前材质的 GLSL、参数和正在使用的效果代码发送到聊天，方便复制并适配到其它引擎；可选附上 Three.js 编译源码 |
 | `write_shader` | AI 直接写 GLSL 新建 / 修改自定义 Shader，先编译检查，失败返回带行号的错误，通过后加入「自定义」分组 |
 | `delete_shader` | 删除自定义 Shader（内置的不能删） |
 | `import_model` / `delete_model` | 从 HTTPS 地址导入 GLB 模型 / 删除导入的模型，见「导入自己的模型」 |
