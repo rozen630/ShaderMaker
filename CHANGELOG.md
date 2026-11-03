@@ -1,6 +1,6 @@
 # 📜 版本说明
 
-每个插件版本在 git 上对应一个 `vX.Y.Z` 标签。插件包（`.cindy`）由 `npm run build:plugin` + Cindy 的 `ghost_forge_pack` 生成，不进仓库。
+每个插件版本在 git 上对应一个 `vX.Y.Z` 标签。推送标签后，GitHub Actions 会运行 `npm run build:plugin`，打包 `dist/cindy-plugin/` 为 ZIP 格式的 `.cindy` 文件，并把包和 SHA-256 校验文件发布到 GitHub Release。此流程不提交插件包到 Git 仓库；本机手动校验仍可使用 Cindy 的 `ghost_forge_pack`。
 
 ---
 

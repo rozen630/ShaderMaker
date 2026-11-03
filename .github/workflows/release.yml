@@ -1,0 +1,100 @@
+name: Release Cindy plugin
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cindy-plugin-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Expected a stable version tag such as v1.8.1, got: $TAG" >&2
+            exit 1
+          fi
+          VERSION="${BASH_REMATCH[1]}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "Tag version $VERSION does not match package.json version $PACKAGE_VERSION" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Cindy plugin
+        run: npm run build:plugin
+
+      - name: Package and validate .cindy
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/cindy-plugin/ghost.json
+          mkdir -p release
+          PACKAGE="$GITHUB_WORKSPACE/release/shadermaker-$VERSION.cindy"
+          (cd dist/cindy-plugin && zip -X -q -r "$PACKAGE" *)
+          unzip -t "$PACKAGE"
+          PACKAGE_FILE="$PACKAGE" VERSION="$VERSION" node - <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const fs = require('node:fs');
+          const manifest = JSON.parse(execFileSync('unzip', ['-p', process.env.PACKAGE_FILE, 'ghost.json'], { encoding: 'utf8' }));
+          if (manifest.id !== 'shadermaker') throw new Error('Unexpected plugin id: ' + manifest.id);
+          if (manifest.version !== process.env.VERSION) throw new Error('Manifest version ' + manifest.version + ' does not match tag version ' + process.env.VERSION);
+          const bytes = fs.statSync(process.env.PACKAGE_FILE).size;
+          if (bytes > 8 * 1024 * 1024) throw new Error('Package is ' + bytes + ' bytes; Cindy limit is 8 MiB');
+          console.log('Validated ' + manifest.id + ' ' + manifest.version + ': ' + bytes + ' bytes');
+          NODE
+          (cd release && sha256sum "shadermaker-$VERSION.cindy" > "shadermaker-$VERSION.cindy.sha256")
+
+      - name: Extract release notes
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        run: python3 .github/scripts/extract-release-notes.py "$VERSION" "$NOTES_FILE"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE="release/shadermaker-$VERSION.cindy"
+          CHECKSUM="$PACKAGE.sha256"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "ShaderMaker $TAG" --notes-file "$NOTES_FILE"
+            gh release upload "$TAG" "$PACKAGE" "$CHECKSUM" --clobber
+          else
+            gh release create "$TAG" "$PACKAGE" "$CHECKSUM" --verify-tag --title "ShaderMaker $TAG" --notes-file "$NOTES_FILE"
+          fi

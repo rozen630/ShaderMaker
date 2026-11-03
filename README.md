@@ -325,7 +325,7 @@ cindy-plugin/          page.js (page entry) · main.js (plugin backend) · manif
 
 ## 📜 Versions
 
-See [CHANGELOG.md](CHANGELOG.md) for changes in each version. Each plugin release corresponds to a `vX.Y.Z` Git tag. The repository is at [github.com/rozen630/ShaderMaker](https://github.com/rozen630/ShaderMaker), with `main` as the default branch.
+See [CHANGELOG.md](CHANGELOG.md) for changes in each version. To publish a release, update the version in `package.json` and add its notes to `CHANGELOG.md`, then push the matching `vX.Y.Z` tag. GitHub Actions builds the Cindy plugin and creates or updates the GitHub Release with the `.cindy` package and its SHA-256 checksum. The repository is at [github.com/rozen630/ShaderMaker](https://github.com/rozen630/ShaderMaker), with `main` as the default branch.
 
 ## 🙏 Third-party assets
 
