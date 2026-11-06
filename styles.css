@@ -317,7 +317,7 @@ body[data-tier="lite"] .pro-only {
 /* 环境：色块 + 名称 */
 .swatches {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -1009,4 +1009,9 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(8, 9, 11, 0.45);
   pointer-events: none;
   z-index: 5;
+}
+
+/* 程序天空的滑条紧跟在环境色块下面 */
+.sky-controls {
+  margin-top: 12px;
 }

@@ -19,6 +19,7 @@ import {
 } from "./customShaders.js";
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
+import { createSky, skySliders } from "./sky.js";
 import { createStylizer, styles, defaultStyle, MASK_LAYER } from "./stylize.js";
 import { createNpr, nprPresets, nprSliders, defaultNprPreset } from "./npr.js";
 import {
@@ -61,6 +62,7 @@ const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
 const presetTitle = document.getElementById("preset-title");
 const envRoot = document.getElementById("environments");
+const skyRoot = document.getElementById("sky-controls");
 const styleRoot = document.getElementById("styles");
 const styleAmountInput = document.getElementById("style-amount");
 const styleAmountValue = document.getElementById("style-amount-value");
@@ -117,6 +119,7 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 const hdrLoader = new RGBELoader();
 const envCache = new Map();
 const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const sky = createSky(renderer, pmrem);
 
 const hemi = new THREE.HemisphereLight(0xdde7ff, 0x1a1512, 0.18);
 scene.add(hemi);
@@ -490,17 +493,47 @@ function applyEnvironmentRotation(radians) {
 }
 
 let currentEnvMap = null;
+// 程序天空的平涂底色随太阳变化，其它环境用固定底色
+let skyFlatColor = environments.sky.background;
 
 // NPR 下背景用环境的平涂底色，照片 HDR 背景和卡通主体放一起会很突兀
 function applyBackground() {
   const env = environments[state.environment];
   const flat = state.render === "npr" && state.scope === "global";
-  scene.background = !flat && currentEnvMap ? currentEnvMap : new THREE.Color(env.background);
+  scene.background = !flat && currentEnvMap ? currentEnvMap : new THREE.Color(env.procedural ? skyFlatColor : env.background);
+}
+
+// 程序天空：重画天空和环境贴图，灯光 / 曝光跟着太阳（src/sky.js）
+function applySky(values) {
+  if (values) sky.set(values);
+  if (state.environment !== "sky") return;
+  const result = sky.render();
+  const { lights } = result;
+  renderer.toneMappingExposure = lights.exposure;
+  applyLight(keyLight, lights.key);
+  applyLight(fillLight, lights.fill);
+  applyLight(rimLight, lights.rim);
+  npr.setLightReference(keyLight);
+  hemi.intensity = lights.hemi;
+  skyFlatColor = lights.flat;
+  scene.environment = result.environment;
+  currentEnvMap = result.background;
+  applyEnvironmentRotation(0);
+  applyBackground();
+  syncSkyControls();
 }
 
 async function setEnvironment(id) {
   const env = environments[id] || environments[defaultEnvironment];
   state.environment = env.id;
+  if (skyRoot) skyRoot.hidden = !env.procedural;
+  if (env.procedural) {
+    applySky();
+    refreshRenderState();
+    highlightEnvironment();
+    setCompileState(true, "ready");
+    return;
+  }
   currentEnvMap = null;
   applyBackground();
   renderer.toneMappingExposure = env.exposure;
@@ -1480,6 +1513,41 @@ function syncSliders() {
   }
 }
 
+// 程序天空的滑条（选中「程序天空」时才显示）
+function renderSkyControls() {
+  if (!skyRoot) return;
+  skyRoot.innerHTML = "";
+  for (const def of skySliders) {
+    const wrap = document.createElement("div");
+    wrap.className = "slider";
+    wrap.innerHTML = `
+      <label>
+        <b>${def.label}</b>
+        <span data-sky="${def.key}"></span>
+      </label>
+      <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" data-sky="${def.key}" />
+    `;
+    const input = wrap.querySelector("input");
+    input.addEventListener("input", () => applySky({ [def.key]: Number(input.value) }));
+    skyRoot.append(wrap);
+  }
+  syncSkyControls();
+}
+
+function syncSkyControls() {
+  if (!skyRoot) return;
+  for (const def of skySliders) {
+    const value = sky.values[def.key];
+    const input = skyRoot.querySelector(`input[data-sky="${def.key}"]`);
+    const label = skyRoot.querySelector(`span[data-sky="${def.key}"]`);
+    if (input) {
+      input.value = String(value);
+      paintRange(input);
+    }
+    if (label) label.textContent = def.suffix ? `${Math.round(value)}${def.suffix}` : value.toFixed(2);
+  }
+}
+
 function renderEnvironments() {
   if (!envRoot) return;
   envRoot.innerHTML = "";
@@ -1740,7 +1808,10 @@ function applyPrompt(text) {
     applyParams(result.params);
   }
   if (result.environment && result.environment !== state.environment) {
+    if (result.sky) sky.set(result.sky);
     setEnvironment(result.environment);
+  } else if (result.sky) {
+    applySky(result.sky);
   }
   if (result.style && result.style !== state.style) setStyle(result.style);
   if (result.nprPreset && result.nprPreset !== state.nprPreset) setNprPreset(result.nprPreset);
@@ -1937,6 +2008,7 @@ document.getElementById("mode-tabs")?.addEventListener("click", (event) => {
 
 setTier(state.tier);
 renderEnvironments();
+renderSkyControls();
 renderStyles();
 renderChannels();
 renderNprPresets();
@@ -1994,6 +2066,7 @@ function getState() {
     styleAmount: round(Number(styleAmountInput?.value ?? 1)),
     scope: state.scope,
     environment: state.environment,
+    sky: state.environment === "sky" ? Object.fromEntries(skySliders.map((def) => [def.key, round(sky.values[def.key])])) : undefined,
     displayModel: state.displayModel,
     model: {
       id: state.displayModel,
@@ -2046,7 +2119,15 @@ async function setLook(look = {}) {
     else warnings.push(`未知的作用范围：${look.scope}`);
   }
   const environment = pick(look.environment, environments, "环境");
+  // sky：程序天空参数；只传它时自动切到程序天空
+  if (look.sky && typeof look.sky === "object") {
+    const known = new Set(skySliders.map((def) => def.key));
+    for (const key of Object.keys(look.sky)) if (!known.has(key)) warnings.push(`未知的天空参数：${key}`);
+    sky.set(look.sky);
+    if (environment && environment !== "sky") warnings.push("sky 参数只在 environment=sky 时生效");
+  }
   if (environment) await setEnvironment(environment);
+  else if (look.sky && typeof look.sky === "object") await setEnvironment("sky");
   // 展示模型：内置 id、导入模型的 id，或导入模型的名字
   if (look.displayModel) {
     const wanted = String(look.displayModel);

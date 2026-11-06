@@ -76,6 +76,8 @@ await build({
 });
 
 for (const env of catalog.environments) {
+  // 程序天空没有 HDR
+  if (!env.hdr) continue;
   // catalog 里是网页版的 2k 地址，换成插件用的分辨率
   const url = env.hdr.replaceAll("2k", HDR_RES);
   const name = basename(url).replace(/\.hdr$/, "");

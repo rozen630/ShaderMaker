@@ -1,5 +1,6 @@
 import { presets } from "./presets.js";
 import { environments } from "./environments.js";
+import { skyPhrases } from "./sky.js";
 import { styles } from "./stylize.js";
 import { nprPresets } from "./npr.js";
 import { displayModels } from "./models.js";
@@ -184,7 +185,10 @@ export function interpretPrompt(raw, state) {
     }
   }
 
-  const colors = findColors(text);
+  // 环境 / 天空词里的颜色字（「黄昏」的黄、「蓝天白云」的蓝和白）不算材质颜色
+  const sceneKeys = [...Object.values(environments).flatMap((env) => env.keys), ...skyPhrases.flatMap((phrase) => phrase.keys)];
+  const colorText = sceneKeys.reduce((rest, key) => rest.replaceAll(key, " "), text);
+  const colors = findColors(colorText);
   if (colors.length >= 2) {
     next.uColorA = mixColor(colors[0].rgb, [0.03, 0.03, 0.04], 0.35);
     next.uColorB = colors[0].rgb;
@@ -407,11 +411,26 @@ export function interpretPrompt(raw, state) {
   }
 
   let environment = state.environment;
-  for (const env of Object.values(environments)) {
-    if (env.keys.some((key) => text.includes(key))) {
-      environment = env.id;
-      notes.push(`环境切到 ${env.name}`);
-      break;
+  // 时间 / 天气词调程序天空：已经在程序天空、句子里提到天空，或这个词不是某张 HDR 的关键词（「多云」「正午」）时生效；
+  // 否则「黄昏」「夜晚」照旧切到对应的 HDR 环境
+  let sky;
+  const hdrKeys = new Set(Object.values(environments).filter((env) => !env.procedural).flatMap((env) => env.keys));
+  const skyNamed = environments.sky.keys.some((key) => text.includes(key));
+  const skyHits = skyPhrases
+    .map((phrase) => ({ phrase, key: phrase.keys.find((key) => text.includes(key)) }))
+    .filter((hit) => hit.key);
+  if (skyHits.length && (skyNamed || state.environment === "sky" || skyHits.some((hit) => !hdrKeys.has(hit.key)))) {
+    sky = Object.assign({}, ...skyHits.map((hit) => hit.phrase.values));
+    if (environment !== "sky") notes.push(`环境切到 ${environments.sky.name}`);
+    environment = "sky";
+    notes.push(`天空：${skyHits.map((hit) => hit.phrase.note).join("、")}`);
+  } else {
+    for (const env of Object.values(environments)) {
+      if (env.keys.some((key) => text.includes(key))) {
+        environment = env.id;
+        notes.push(`环境切到 ${env.name}`);
+        break;
+      }
     }
   }
 
@@ -427,6 +446,7 @@ export function interpretPrompt(raw, state) {
     preset: presetId,
     shader,
     environment,
+    sky,
     style,
     render,
     nprPreset,

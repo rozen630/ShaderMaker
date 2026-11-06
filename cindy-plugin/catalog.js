@@ -2,6 +2,7 @@
 import { presets, sliderDefs } from "../src/presets.js";
 import { styles } from "../src/stylize.js";
 import { environments } from "../src/environments.js";
+import { skySliders } from "../src/sky.js";
 import { displayModels } from "../src/models.js";
 import { nprPresets, nprSliders } from "../src/npr.js";
 import { voxelResolution } from "../src/voxel.js";
@@ -16,6 +17,7 @@ export const catalog = {
   })),
   styles: Object.values(styles).map(({ id, name }) => ({ id, name })),
   environments: Object.values(environments).map(({ id, name, hdr }) => ({ id, name, hdr })),
+  skyParams: skySliders.map(({ key, label, min, max }) => ({ key, label, min, max })),
   displayModels: Object.values(displayModels).map(({ id, label }) => ({ id, name: label })),
   nprPresets: Object.values(nprPresets).map(({ id, name }) => ({ id, name })),
   params: unique(sliderDefs).map(({ key, label, min, max }) => ({ key, label, min, max })),

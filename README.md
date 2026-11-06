@@ -193,6 +193,7 @@ Live thumbnail cards; Pro mode can filter by category (`shaderCategories` in `sr
 
 - Direct light comes from Key/Fill directional lights, a Rim point light and hemisphere light. Key Light casts shadows.
 - HDR is processed with PMREM into `scene.environment` for image-based indirect diffuse and specular lighting (not dynamic multi-bounce global illumination).
+- **Procedural sky** (`src/sky.js`): no HDR. Sun elevation/azimuth, cloud cover and haze drive the sky (twilight, sun glow, clouds, stars and moon). It is rendered to a cubemap for the background and through PMREM for lighting. Key Light is the sun, tinted by an atmospheric-transmittance estimate (more orange near the horizon), and becomes cool moonlight after sunset; exposure, Fill and Rim follow. Chat phrases such as "dusk", "overcast" or "noon, clear" adjust it directly. It is a visual approximation, not a physical atmosphere integration.
 - Surface Shaders output Base Color, AO/Roughness/Metalness, Normal and Emissive separately; each material generates its normal map from its own height function.
 
 ### Stylized NPR · cel shading / anime / painterly
@@ -239,7 +240,7 @@ An immersive canvas keeps the model large, with frosted-glass material and appea
 - **Pro:** all parameters grouped into Base / Surface / Volume, material-category filters, filter strength and scope, and channel inspection.
 - Both modes share material and settings state. Switching does not discard changes. `lite: true` in `src/presets.js` / `src/npr.js` determines which sliders appear in Lite.
 
-**Display** follows MaterialX Viewer: the model floats against a clear HDR environment (studio / sunset / night / outdoor plaza), without a floor or pedestal and without auto-rotation. Drag to inspect it.
+**Display** follows MaterialX Viewer: the model floats against a clear HDR environment (studio / sunset / night / outdoor HDRs, or the procedural sky), without a floor or pedestal and without auto-rotation. Drag to inspect it.
 
 - **Shader Ball** (default): the shell uses the current material; the inner color ring and gray base remain realistic as calibration references in every mode.
 - **Sphere / Cube** (rounded): share the Shader Ball's framing.
@@ -260,7 +261,7 @@ Then use Cindy's `ghost_forge_pack` to package `dist/cindy-plugin/` as `shaderma
 
 | AI tool | Purpose |
 |---|---|
-| `set_look` | Set materials, PBR/NPR, NPR presets, filters and strength, scope, environment, display model, voxels and detail, material values, colors and NPR parameters; returns the full state |
+| `set_look` | Set materials, PBR/NPR, NPR presets, filters and strength, scope, environment and procedural sky (`sky`: sun elevation/azimuth, clouds, haze), display model, voxels and detail, material values, colors and NPR parameters; returns the full state |
 | `describe_look` | Parse a natural-language change from Cindy chat (reuses `src/nl.js`) |
 | `snapshot` | Capture the current view so the assistant can inspect it |
 | `read_shader` | Without an ID: custom shader instructions and list; with an ID: that shader's GLSL source as a template; `library`: signatures and return values for all tiling functions |
@@ -316,6 +317,7 @@ src/
 ├── stylize.js         Screen-space filter post-processing pipeline
 ├── models.js          Display models (Shader Ball / sphere / cube), tessellation, calibration parts
 ├── environments.js    HDR environments
+├── sky.js             Procedural sky: sky shader, sun color, sun-driven lights
 ├── nl.js              Natural-language parsing
 └── vendor/            tileable-shaders (MIT)
 cindy-plugin/          page.js (page entry) · main.js (plugin backend) · manifest.mjs · build.mjs

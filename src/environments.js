@@ -48,7 +48,7 @@ export const environments = {
   },
   plaza: {
     id: "plaza",
-    name: "户外广场",
+    name: "户外",
     keys: ["户外", "广场", "室外", "plaza", "outdoor", "daylight"],
     hdr: polyHaven("spruit_sunrise"),
     background: 0x8ea4b8,
@@ -58,6 +58,16 @@ export const environments = {
     fill: { color: 0x9ec4ff, intensity: 0.12, position: [-4.0, 2.4, -2.0] },
     rim: { color: 0xffffff, intensity: 0.9, position: [-1.8, 3.0, 2.8] },
     hemi: 0.1,
+  },
+  // 程序天空（src/sky.js）：没有 HDR，灯光、曝光和背景由太阳高度 / 方位、云量、霾实时算出；
+  // 这里的 key / background 只用来画面板上的色块
+  sky: {
+    id: "sky",
+    name: "天空",
+    procedural: true,
+    keys: ["程序天空", "天空", "蓝天", "白云", "procedural sky", "sky"],
+    background: 0x6f8fc0,
+    key: { color: 0xfff1d6 },
   },
 };
 

@@ -54,7 +54,14 @@ export function buildManifest(catalog, version) {
             environment: {
               type: "string",
               enum: catalog.environments.map((item) => item.id),
-              description: `环境光（HDR）：${list(catalog.environments)}`,
+              description: `环境光：${list(catalog.environments)}。sky 是程序天空，用 sky 参数调太阳和天气，其余是 HDR`,
+            },
+            sky: {
+              type: "object",
+              properties: Object.fromEntries(
+                catalog.skyParams.map((item) => [item.key, { type: "number", minimum: item.min, maximum: item.max, description: item.label }]),
+              ),
+              description: `程序天空参数，只传它时自动切到 environment=sky：${ranges(catalog.skyParams)}。太阳高度单位是度，<0 为日落后（暮光 / 夜晚，主光换成月光）；方位 0–360 度；云量 / 霾 0–1`,
             },
             displayModel: {
               type: "string",
