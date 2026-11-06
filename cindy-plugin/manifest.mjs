@@ -1,5 +1,7 @@
 // ghost.json 生成器：工具参数的枚举和说明全部来自 catalog（现有数据），新增材质 / 滤镜 / 环境不用改这里。
 const list = (items) => items.map((item) => `${item.id}=${item.name}`).join("，");
+const filterList = (items) =>
+  items.map((item) => `${item.id}=${item.name}（${item.params.map((p) => `${p.key} ${p.label} ${p.min}–${p.max}，默认 ${p.default}`).join("；")}）`).join("，");
 const ranges = (items) => items.map((item) => `${item.key}(${item.label} ${item.min}–${item.max})`).join("，");
 
 export function buildManifest(catalog, version) {
@@ -26,7 +28,7 @@ export function buildManifest(catalog, version) {
       {
         name: "set_look",
         description:
-          "精确设置 ShaderMaker 页面的材质、渲染模式、滤镜、环境、展示模型、体素和材质参数，只改传入的项。返回调整后的完整状态与无法识别的项（warnings）。没有打开的 ShaderMaker 页面时会自动在当前任务右侧栏打开（首次需加载几秒）。",
+          "精确设置 ShaderMaker 页面的材质、渲染模式、滤镜（可叠加）、环境、展示模型、体素和材质参数，只改传入的项。返回调整后的完整状态与无法识别的项（warnings）。没有打开的 ShaderMaker 页面时会自动在当前任务右侧栏打开（首次需加载几秒）。",
         parameters: {
           type: "object",
           properties: {
@@ -40,12 +42,26 @@ export function buildManifest(catalog, version) {
               enum: catalog.nprPresets.map((item) => item.id),
               description: `NPR 风格预设：${list(catalog.nprPresets)}。只传它而不传 render 时会自动切到 npr`,
             },
+            filters: {
+              type: "array",
+              maxItems: catalog.maxFilters,
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string", enum: catalog.filters.map((item) => item.id) },
+                  amount: { type: "number", minimum: 0, maximum: 1, description: "这个滤镜的强度，默认 1" },
+                  params: { type: "object", additionalProperties: { type: "number" }, description: "这个滤镜的参数，见 filters 的说明" },
+                },
+                required: ["id"],
+              },
+              description: `画面滤镜叠加，按数组顺序依次处理，最多 ${catalog.maxFilters} 个，替换当前叠加；传 [] 关闭。可选滤镜和参数：${filterList(catalog.filters)}`,
+            },
             style: {
               type: "string",
-              enum: catalog.styles.map((item) => item.id),
-              description: `画面滤镜：${list(catalog.styles)}`,
+              enum: ["none", ...catalog.filters.map((item) => item.id)],
+              description: `只用一个画面滤镜（等于 filters 只放一个）：none=无，${list(catalog.filters)}`,
             },
-            styleAmount: { type: "number", minimum: 0, maximum: 1, description: "滤镜强度 0–1" },
+            styleAmount: { type: "number", minimum: 0, maximum: 1, description: "全部滤镜的总强度 0–1" },
             scope: {
               type: "string",
               enum: ["subject", "global"],
@@ -54,7 +70,14 @@ export function buildManifest(catalog, version) {
             environment: {
               type: "string",
               enum: catalog.environments.map((item) => item.id),
-              description: `环境光（HDR）：${list(catalog.environments)}`,
+              description: `环境光：${list(catalog.environments)}。sky 是程序天空，用 sky 参数调太阳和天气，其余是 HDR`,
+            },
+            sky: {
+              type: "object",
+              properties: Object.fromEntries(
+                catalog.skyParams.map((item) => [item.key, { type: "number", minimum: item.min, maximum: item.max, description: item.label }]),
+              ),
+              description: `程序天空参数，只传它时自动切到 environment=sky：${ranges(catalog.skyParams)}。太阳高度单位是度，<0 为日落后（暮光 / 夜晚，主光换成月光）；方位 0–360 度；云量 / 霾 0–1`,
             },
             displayModel: {
               type: "string",

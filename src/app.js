@@ -19,7 +19,9 @@ import {
 } from "./customShaders.js";
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
-import { createStylizer, styles, defaultStyle, MASK_LAYER } from "./stylize.js";
+import { createSky, skySliders } from "./sky.js";
+import { createStylizer, MASK_LAYER } from "./stylize.js";
+import { filters, noFilter, MAX_FILTERS } from "./filters.js";
 import { createNpr, nprPresets, nprSliders, defaultNprPreset } from "./npr.js";
 import {
   displayModels,
@@ -61,7 +63,9 @@ const canvas = document.getElementById("stage");
 const presetRoot = document.getElementById("presets");
 const presetTitle = document.getElementById("preset-title");
 const envRoot = document.getElementById("environments");
+const skyRoot = document.getElementById("sky-controls");
 const styleRoot = document.getElementById("styles");
+const filterParamRoot = document.getElementById("filter-params");
 const styleAmountInput = document.getElementById("style-amount");
 const styleAmountValue = document.getElementById("style-amount-value");
 const channelRoot = document.getElementById("channels");
@@ -117,6 +121,7 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 const hdrLoader = new RGBELoader();
 const envCache = new Map();
 const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const sky = createSky(renderer, pmrem);
 
 const hemi = new THREE.HemisphereLight(0xdde7ff, 0x1a1512, 0.18);
 scene.add(hemi);
@@ -251,6 +256,8 @@ function makeTarget(colorSpace) {
   });
   target.texture.generateMipmaps = true;
   target.texture.minFilter = THREE.LinearMipmapLinearFilter;
+  // 各向异性过滤：斜着看的表面（球的边缘、地面方向）细节不糊
+  target.texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   target.texture.magFilter = THREE.LinearFilter;
   target.texture.wrapS = THREE.RepeatWrapping;
   target.texture.wrapT = THREE.RepeatWrapping;
@@ -352,7 +359,8 @@ const state = {
   effect: null,
   shader: "snow",
   environment: defaultEnvironment,
-  style: defaultStyle,
+  // 叠加中的第一个滤镜（兼容旧的单滤镜接口）；完整列表在 stylizer.chain
+  style: "none",
   render: "pbr",
   voxelOn: false,
   voxelRes: voxelResolution.default,
@@ -490,17 +498,47 @@ function applyEnvironmentRotation(radians) {
 }
 
 let currentEnvMap = null;
+// 程序天空的平涂底色随太阳变化，其它环境用固定底色
+let skyFlatColor = environments.sky.background;
 
 // NPR 下背景用环境的平涂底色，照片 HDR 背景和卡通主体放一起会很突兀
 function applyBackground() {
   const env = environments[state.environment];
   const flat = state.render === "npr" && state.scope === "global";
-  scene.background = !flat && currentEnvMap ? currentEnvMap : new THREE.Color(env.background);
+  scene.background = !flat && currentEnvMap ? currentEnvMap : new THREE.Color(env.procedural ? skyFlatColor : env.background);
+}
+
+// 程序天空：重画天空和环境贴图，灯光 / 曝光跟着太阳（src/sky.js）
+function applySky(values) {
+  if (values) sky.set(values);
+  if (state.environment !== "sky") return;
+  const result = sky.render();
+  const { lights } = result;
+  renderer.toneMappingExposure = lights.exposure;
+  applyLight(keyLight, lights.key);
+  applyLight(fillLight, lights.fill);
+  applyLight(rimLight, lights.rim);
+  npr.setLightReference(keyLight);
+  hemi.intensity = lights.hemi;
+  skyFlatColor = lights.flat;
+  scene.environment = result.environment;
+  currentEnvMap = result.background;
+  applyEnvironmentRotation(0);
+  applyBackground();
+  syncSkyControls();
 }
 
 async function setEnvironment(id) {
   const env = environments[id] || environments[defaultEnvironment];
   state.environment = env.id;
+  if (skyRoot) skyRoot.hidden = !env.procedural;
+  if (env.procedural) {
+    applySky();
+    refreshRenderState();
+    highlightEnvironment();
+    setCompileState(true, "ready");
+    return;
+  }
   currentEnvMap = null;
   applyBackground();
   renderer.toneMappingExposure = env.exposure;
@@ -1422,31 +1460,100 @@ function renderChannels() {
   }
 }
 
-function setStyle(id) {
-  const style = stylizer.setStyle(id);
-  state.style = style.id;
-  for (const button of styleRoot?.querySelectorAll("[data-id]") || []) {
-    button.classList.toggle("active", button.dataset.id === state.style);
-  }
+// 画面滤镜：最多叠加 MAX_FILTERS 个，按顺序处理（filters.js / stylize.js）
+function setFilters(next, warnings = []) {
+  const chain = stylizer.setChain(next, warnings);
+  state.style = chain[0]?.id || "none";
+  syncFilterControls();
   updateTitle();
-  return style;
+  return chain;
+}
+
+function setStyle(id) {
+  return setFilters(id && id !== "none" ? [{ id }] : []);
+}
+
+// Lite：点一下换成这个滤镜；Pro：点一下加入 / 移出叠加
+function toggleFilter(id) {
+  const chain = stylizer.chain;
+  if (id === "none") return setFilters([]);
+  if (state.tier !== "pro") return setFilters(chain.length === 1 && chain[0].id === id ? [] : [{ id }]);
+  if (chain.some((entry) => entry.id === id)) return setFilters(chain.filter((entry) => entry.id !== id));
+  if (chain.length >= MAX_FILTERS) {
+    logEl.textContent = `最多叠加 ${MAX_FILTERS} 个滤镜`;
+    return chain;
+  }
+  return setFilters([...chain, { id }]);
 }
 
 function renderStyles() {
   if (!styleRoot) return;
   styleRoot.innerHTML = "";
-  for (const style of Object.values(styles)) {
+  for (const filter of [noFilter, ...Object.values(filters)]) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chip";
-    button.dataset.id = style.id;
-    button.textContent = style.name;
+    button.dataset.id = filter.id;
+    button.innerHTML = `${filter.name}<sup></sup>`;
     button.addEventListener("click", () => {
-      setStyle(style.id);
-      logEl.textContent = style.id === "none" ? "关闭画面滤镜" : `滤镜切到 ${style.name}`;
+      const chain = toggleFilter(filter.id);
+      logEl.textContent = chain.length ? `滤镜：${chain.map((entry) => filters[entry.id].name).join(" + ")}` : "关闭画面滤镜";
     });
     styleRoot.append(button);
   }
+  syncFilterControls();
+}
+
+// 色块高亮 + 叠加顺序角标，以及 Pro 下每个叠加滤镜的强度 / 参数滑条
+function syncFilterControls() {
+  const chain = stylizer.chain;
+  for (const button of styleRoot?.querySelectorAll("[data-id]") || []) {
+    const order = chain.findIndex((entry) => entry.id === button.dataset.id);
+    const active = button.dataset.id === "none" ? chain.length === 0 : order >= 0;
+    button.classList.toggle("active", active);
+    const badge = button.querySelector("sup");
+    if (badge) badge.textContent = chain.length > 1 && order >= 0 ? String(order + 1) : "";
+  }
+  if (!filterParamRoot) return;
+  filterParamRoot.innerHTML = "";
+  for (const entry of chain) {
+    const filter = filters[entry.id];
+    const heading = document.createElement("div");
+    heading.className = "slider-group";
+    heading.textContent = filter.name;
+    filterParamRoot.append(heading);
+    const defs = [{ key: "amount", label: "强度", min: 0, max: 1, step: 0.01 }, ...filter.params];
+    for (const def of defs) {
+      const value = def.key === "amount" ? entry.amount : entry.params[def.key];
+      const wrap = document.createElement("div");
+      wrap.className = "slider";
+      wrap.innerHTML = `
+        <label>
+          <b>${def.label}</b>
+          <span></span>
+        </label>
+        <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" />
+      `;
+      const input = wrap.querySelector("input");
+      const label = wrap.querySelector("span");
+      const show = () => {
+        label.textContent = def.key === "amount" ? `${Math.round(Number(input.value) * 100)}%` : formatFilterValue(Number(input.value), def.step);
+        paintRange(input);
+      };
+      input.value = String(value);
+      show();
+      input.addEventListener("input", () => {
+        const number = Number(input.value);
+        stylizer.updateFilter(entry.id, def.key === "amount" ? { amount: number } : { params: { [def.key]: number } });
+        show();
+      });
+      filterParamRoot.append(wrap);
+    }
+  }
+}
+
+function formatFilterValue(value, step) {
+  return step >= 1 ? String(Math.round(value)) : value.toFixed(step >= 0.1 ? 1 : 2);
 }
 
 function updateTitle() {
@@ -1455,7 +1562,8 @@ function updateTitle() {
   const parts = [base];
   if (state.render === "npr") parts.push(`卡通 ${nprPresets[state.nprPreset].name}`);
   if (state.voxelOn) parts.push(`体素 ${state.voxelRes}`);
-  if (state.style !== "none") parts.push(styles[state.style].name);
+  const chain = stylizer.chain;
+  if (chain.length) parts.push(chain.map((entry) => filters[entry.id].name).join(" + "));
   nameEl.textContent = parts.join(" · ");
 }
 
@@ -1477,6 +1585,41 @@ function syncSliders() {
       paintRange(input);
       value.textContent = Number(sliderValue(def)).toFixed(def.step >= 1 ? 0 : def.step < 0.01 ? 3 : 2);
     }
+  }
+}
+
+// 程序天空的滑条（选中「程序天空」时才显示）
+function renderSkyControls() {
+  if (!skyRoot) return;
+  skyRoot.innerHTML = "";
+  for (const def of skySliders) {
+    const wrap = document.createElement("div");
+    wrap.className = "slider";
+    wrap.innerHTML = `
+      <label>
+        <b>${def.label}</b>
+        <span data-sky="${def.key}"></span>
+      </label>
+      <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" data-sky="${def.key}" />
+    `;
+    const input = wrap.querySelector("input");
+    input.addEventListener("input", () => applySky({ [def.key]: Number(input.value) }));
+    skyRoot.append(wrap);
+  }
+  syncSkyControls();
+}
+
+function syncSkyControls() {
+  if (!skyRoot) return;
+  for (const def of skySliders) {
+    const value = sky.values[def.key];
+    const input = skyRoot.querySelector(`input[data-sky="${def.key}"]`);
+    const label = skyRoot.querySelector(`span[data-sky="${def.key}"]`);
+    if (input) {
+      input.value = String(value);
+      paintRange(input);
+    }
+    if (label) label.textContent = def.suffix ? `${Math.round(value)}${def.suffix}` : value.toFixed(2);
   }
 }
 
@@ -1720,7 +1863,7 @@ function applyPrompt(text) {
       if (effectUses(effect.record, "uClickAge")) pushClick(defaultClickPoint());
     }
     const note = effect.off ? "关闭效果" : `效果：${effect.record.name}`;
-    const rest = interpretPrompt(effect.rest, { ...state, nprValues: npr.values });
+    const rest = interpretPrompt(effect.rest, { ...state, filters: stylizer.chain, nprValues: npr.values });
     if (!rest.ok) {
       logEl.textContent = note;
       return { ok: true, message: note };
@@ -1730,7 +1873,7 @@ function applyPrompt(text) {
     logEl.textContent = result.message;
     return result;
   }
-  const result = interpretPrompt(text, { ...state, nprValues: npr.values });
+  const result = interpretPrompt(text, { ...state, filters: stylizer.chain, nprValues: npr.values });
   logEl.textContent = result.message;
   if (!result.ok) return result;
   const nextPreset = result.preset || result.shader;
@@ -1740,9 +1883,12 @@ function applyPrompt(text) {
     applyParams(result.params);
   }
   if (result.environment && result.environment !== state.environment) {
+    if (result.sky) sky.set(result.sky);
     setEnvironment(result.environment);
+  } else if (result.sky) {
+    applySky(result.sky);
   }
-  if (result.style && result.style !== state.style) setStyle(result.style);
+  if (result.filters) setFilters(result.filters);
   if (result.nprPreset && result.nprPreset !== state.nprPreset) setNprPreset(result.nprPreset);
   if (result.nprValues) {
     npr.setValues(result.nprValues);
@@ -1937,6 +2083,7 @@ document.getElementById("mode-tabs")?.addEventListener("click", (event) => {
 
 setTier(state.tier);
 renderEnvironments();
+renderSkyControls();
 renderStyles();
 renderChannels();
 renderNprPresets();
@@ -1944,7 +2091,7 @@ renderDisplayModels();
 initVoxelControls();
 initEffects();
 initModelImport();
-setStyle(defaultStyle);
+setFilters([]);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
 setPreset("snow", presets.snow);
@@ -1991,9 +2138,11 @@ function getState() {
     nprPreset: state.nprPreset,
     nprValues: state.render === "npr" ? Object.fromEntries(nprSliders.map((def) => [def.key, round(npr.values[def.key])])) : undefined,
     style: state.style,
+    filters: stylizer.chain,
     styleAmount: round(Number(styleAmountInput?.value ?? 1)),
     scope: state.scope,
     environment: state.environment,
+    sky: state.environment === "sky" ? Object.fromEntries(skySliders.map((def) => [def.key, round(sky.values[def.key])])) : undefined,
     displayModel: state.displayModel,
     model: {
       id: state.displayModel,
@@ -2038,15 +2187,29 @@ async function setLook(look = {}) {
   } else if (nprPreset && state.render !== "npr") {
     setRender("npr");
   }
-  const style = pick(look.style, styles, "滤镜");
-  if (style) setStyle(style);
+  // filters：按顺序叠加的滤镜 [{ id, amount, params }]，替换当前叠加；style：只用一个滤镜（旧接口）
+  if (Array.isArray(look.filters)) {
+    setFilters(look.filters, warnings);
+    if (look.style !== undefined) warnings.push("同时传了 filters 和 style，以 filters 为准");
+  } else if (look.style !== undefined && look.style !== null && look.style !== "") {
+    if (look.style === "none" || filters[look.style]) setStyle(look.style);
+    else warnings.push(`未知的滤镜：${look.style}`);
+  }
   if (look.styleAmount !== undefined) setStyleAmount(look.styleAmount);
   if (look.scope) {
     if (look.scope === "subject" || look.scope === "global") setScope(look.scope);
     else warnings.push(`未知的作用范围：${look.scope}`);
   }
   const environment = pick(look.environment, environments, "环境");
+  // sky：程序天空参数；只传它时自动切到程序天空
+  if (look.sky && typeof look.sky === "object") {
+    const known = new Set(skySliders.map((def) => def.key));
+    for (const key of Object.keys(look.sky)) if (!known.has(key)) warnings.push(`未知的天空参数：${key}`);
+    sky.set(look.sky);
+    if (environment && environment !== "sky") warnings.push("sky 参数只在 environment=sky 时生效");
+  }
   if (environment) await setEnvironment(environment);
+  else if (look.sky && typeof look.sky === "object") await setEnvironment("sky");
   // 展示模型：内置 id、导入模型的 id，或导入模型的名字
   if (look.displayModel) {
     const wanted = String(look.displayModel);

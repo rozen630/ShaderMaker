@@ -317,7 +317,7 @@ body[data-tier="lite"] .pro-only {
 /* 环境：色块 + 名称 */
 .swatches {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -1009,4 +1009,25 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(8, 9, 11, 0.45);
   pointer-events: none;
   z-index: 5;
+}
+
+/* 程序天空的滑条紧跟在环境色块下面 */
+.sky-controls {
+  margin-top: 12px;
+}
+
+/* 滤镜叠加顺序角标（叠了 2 个以上才显示） */
+.chips .chip sup {
+  margin-left: 3px;
+  font-size: 10px;
+  line-height: 0;
+  opacity: 0.75;
+}
+
+.chips .chip sup:empty {
+  display: none;
+}
+
+.filter-params:not(:empty) {
+  margin-top: 10px;
 }

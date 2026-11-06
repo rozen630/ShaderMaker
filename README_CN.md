@@ -190,6 +190,7 @@ AI 工具：`read_effect`（写法说明 / 读范例）、`write_effect`（编�
 ### 写实 PBR
 - 直射光来自 Key / Fill 方向光、Rim 点光和半球光，Key Light 开启阴影。
 - HDR 经 PMREM 写入 `scene.environment`，提供 IBL 间接漫反射和镜面反射（不是动态多次反弹 GI）。
+- **程序天空**（`src/sky.js`）：不用 HDR，按太阳高度 / 方位、云量、霾画出天空（暮色、太阳光晕、云、星星和月亮），渲染成立方体贴图当背景，再经 PMREM 做环境光。Key Light 就是太阳，颜色按大气透射估算（越低越橙），太阳落下后换成冷色月光；曝光、Fill、Rim 跟着变。聊天里说「黄昏」「阴天」「正午，晴朗」会直接调天空。这是视觉近似，不是物理大气积分。
 - Surface Shader 分别输出 Base Color、AO / Roughness / Metalness、Normal、Emissive，法线由各材质自己的高度函数生成。
 
 ### 卡通 NPR · 赛璐璐 / 二次元 / 厚涂
@@ -223,6 +224,8 @@ NPR 不是滤镜，而是给 `MeshToonMaterial` 打补丁、换掉光照模型�
 ### 画面滤镜
 像素 / 漫画 / 油画 / 素描 / 赛博 / 胶片 / 蓝图。
 NPR 是材质 Shader，着色时就知道法线、光源和阴影；滤镜是相机后处理，只拿到渲染好的 2D 像素。两者可以叠加。勾线类滤镜的法线深度图支持体素和置换。
+- **滤镜可以叠加**：最多 3 个，按顺序处理（先像素再胶片 ≠ 先胶片再像素），每个有自己的强度和参数（像素大小、网点大小、颗粒、暗角等）。Pro 下点色块加入 / 移出叠加，色块角标是顺序，下面出现各自的滑条；Lite 仍是单选。聊天里说「像素，再加胶片」会叠加。
+- **注册表**（`src/filters.js`）：每个滤镜是一份数据——名字、口语关键词、参数、GLSL 函数 `vec3 stylize(uv, src, frag)`。参数自动变成 uniform、面板滑条和 `set_look.filters` 的说明，新增滤镜只改这个文件。
 
 ---
 
@@ -234,7 +237,7 @@ NPR 是材质 Shader，着色时就知道法线、光源和阴影；滤镜是相
 - **Pro**：全部参数（按基础 / 表层 / 体积分组）、材质分类筛选、滤镜强度、作用范围、通道检查。
 - 两种模式共用同一份材质和设置，切换不丢状态。哪些滑条属于 Lite 由 `src/presets.js` / `src/npr.js` 里的 `lite: true` 决定。
 
-**展示**参照 MaterialX Viewer：模型悬浮在清晰的 HDR 环境前（摄影棚 / 日落 / 夜景 / 户外广场），不放地面和台座，不自动旋转，拖动画面查看。
+**展示**参照 MaterialX Viewer：模型悬浮在清晰的 HDR 环境前（摄影棚 / 日落 / 夜景 / 户外 HDR，或程序天空），不放地面和台座，不自动旋转，拖动画面查看。
 
 - **Shader Ball**（默认）：外壳挂当前材质；内芯色环和灰底盘是校色参照，任何模式下都保持写实。
 - **球 / 方块**（圆角）：和 Shader Ball 共用同一个取景框。
@@ -256,7 +259,7 @@ npm run build:plugin      # → dist/cindy-plugin/
 
 | AI 工具 | 作用 |
 |---|---|
-| `set_look` | 精确设置材质、PBR / NPR、NPR 预设、滤镜与强度、作用范围、环境、展示模型、体素与精细度、材质参数、三色、NPR 参数，返回完整状态 |
+| `set_look` | 精确设置材质、PBR / NPR、NPR 预设、滤镜叠加（`filters`：顺序、强度、参数）与总强度、作用范围、环境与程序天空（`sky`：太阳高度 / 方位、云量、霾）、展示模型、体素与精细度、材质参数、三色、NPR 参数，返回完整状态 |
 | `describe_look` | 解析 Cindy 聊天里的一句话调整（复用 `src/nl.js`） |
 | `snapshot` | 截取当前画面给 AI 看，方便它边调边检查 |
 | `read_shader` | 不传 id：自定义 Shader 写法说明 + 全部 Shader 列表；传 id：某个 Shader 的 GLSL 源码当模板；`library`：可平铺函数库的全部签名和返回值 |
@@ -309,9 +312,11 @@ src/
 ├── triplanar.js     三向投影、可平铺处理
 ├── npr.js           NPR 光照模型、描边、PBR → NPR 转换规则
 ├── voxel.js         体素化：表面采样、体素 AO、实例化网格、材质体素补丁
-├── stylize.js       画面滤镜后处理管线
+├── filters.js       画面滤镜注册表：每个滤镜的参数、关键词和 GLSL
+├── stylize.js       画面滤镜后处理管线（按叠加顺序编译成 pass）
 ├── models.js        展示模型（Shader Ball / 球 / 方块）、曲面细分、校色件
 ├── environments.js  HDR 环境
+├── sky.js           程序天空：天空 shader、太阳颜色、跟随太阳的灯光
 ├── nl.js            自然语言解析
 └── vendor/          tileable-shaders（MIT）
 cindy-plugin/        page.js（页面入口）· main.js（插件后台）· manifest.mjs · build.mjs
