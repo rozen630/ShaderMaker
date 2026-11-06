@@ -254,6 +254,8 @@ function makeTarget(colorSpace) {
   });
   target.texture.generateMipmaps = true;
   target.texture.minFilter = THREE.LinearMipmapLinearFilter;
+  // 各向异性过滤：斜着看的表面（球的边缘、地面方向）细节不糊
+  target.texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   target.texture.magFilter = THREE.LinearFilter;
   target.texture.wrapS = THREE.RepeatWrapping;
   target.texture.wrapT = THREE.RepeatWrapping;
