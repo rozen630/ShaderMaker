@@ -1,7 +1,7 @@
 import { presets } from "./presets.js";
 import { environments } from "./environments.js";
 import { skyPhrases } from "./sky.js";
-import { styles } from "./stylize.js";
+import { filters, noFilter } from "./filters.js";
 import { nprPresets } from "./npr.js";
 import { displayModels } from "./models.js";
 
@@ -185,8 +185,12 @@ export function interpretPrompt(raw, state) {
     }
   }
 
-  // 环境 / 天空词里的颜色字（「黄昏」的黄、「蓝天白云」的蓝和白）不算材质颜色
-  const sceneKeys = [...Object.values(environments).flatMap((env) => env.keys), ...skyPhrases.flatMap((phrase) => phrase.keys)];
+  // 环境 / 天空 / 滤镜词里的颜色字（「黄昏」的黄、「蓝天白云」的蓝和白、「蓝图」的蓝）不算材质颜色
+  const sceneKeys = [
+    ...Object.values(environments).flatMap((env) => env.keys),
+    ...skyPhrases.flatMap((phrase) => phrase.keys),
+    ...Object.values(filters).flatMap((filter) => filter.keys),
+  ];
   const colorText = sceneKeys.reduce((rest, key) => rest.replaceAll(key, " "), text);
   const colors = findColors(colorText);
   if (colors.length >= 2) {
@@ -333,13 +337,19 @@ export function interpretPrompt(raw, state) {
     notes.push("加强法线");
   }
 
-  let style = state.style;
-  for (const item of Object.values(styles)) {
-    if (item.keys.some((key) => text.includes(key))) {
-      style = item.id;
-      notes.push(item.id === "none" ? "关闭滤镜" : `滤镜切到 ${item.name}`);
-      break;
-    }
+  // 滤镜：按句子里出现的先后叠加；说了「再加 / 叠加 / 加上」就接在现有滤镜后面，否则替换
+  let filterChain;
+  const filterHits = Object.values(filters)
+    .map((filter) => ({ filter, at: Math.min(...filter.keys.map((key) => text.indexOf(key)).filter((index) => index >= 0)) }))
+    .filter((hit) => Number.isFinite(hit.at))
+    .sort((a, b) => a.at - b.at);
+  if (noFilter.keys.some((key) => text.includes(key))) {
+    filterChain = [];
+    notes.push("关闭滤镜");
+  } else if (filterHits.length) {
+    const base = /叠加|再加|加上|加个|加点|plus|\+/.test(text) ? state.filters || [] : [];
+    filterChain = [...base, ...filterHits.map((hit) => ({ id: hit.filter.id })).filter((entry) => !base.some((item) => item.id === entry.id))];
+    notes.push(`滤镜：${filterChain.map((entry) => filters[entry.id].name).join(" + ")}`);
   }
 
   let render = state.render;
@@ -358,7 +368,7 @@ export function interpretPrompt(raw, state) {
   }
   if (pbrRenderKeys.some((key) => text.includes(key))) {
     render = "pbr";
-    style = "none";
+    filterChain = [];
     notes.push("回到 PBR 写实");
   }
 
@@ -447,7 +457,7 @@ export function interpretPrompt(raw, state) {
     shader,
     environment,
     sky,
-    style,
+    filters: filterChain,
     render,
     nprPreset,
     nprValues,

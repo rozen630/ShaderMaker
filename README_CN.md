@@ -224,6 +224,8 @@ NPR 不是滤镜，而是给 `MeshToonMaterial` 打补丁、换掉光照模型�
 ### 画面滤镜
 像素 / 漫画 / 油画 / 素描 / 赛博 / 胶片 / 蓝图。
 NPR 是材质 Shader，着色时就知道法线、光源和阴影；滤镜是相机后处理，只拿到渲染好的 2D 像素。两者可以叠加。勾线类滤镜的法线深度图支持体素和置换。
+- **滤镜可以叠加**：最多 3 个，按顺序处理（先像素再胶片 ≠ 先胶片再像素），每个有自己的强度和参数（像素大小、网点大小、颗粒、暗角等）。Pro 下点色块加入 / 移出叠加，色块角标是顺序，下面出现各自的滑条；Lite 仍是单选。聊天里说「像素，再加胶片」会叠加。
+- **注册表**（`src/filters.js`）：每个滤镜是一份数据——名字、口语关键词、参数、GLSL 函数 `vec3 stylize(uv, src, frag)`。参数自动变成 uniform、面板滑条和 `set_look.filters` 的说明，新增滤镜只改这个文件。
 
 ---
 
@@ -257,7 +259,7 @@ npm run build:plugin      # → dist/cindy-plugin/
 
 | AI 工具 | 作用 |
 |---|---|
-| `set_look` | 精确设置材质、PBR / NPR、NPR 预设、滤镜与强度、作用范围、环境与程序天空（`sky`：太阳高度 / 方位、云量、霾）、展示模型、体素与精细度、材质参数、三色、NPR 参数，返回完整状态 |
+| `set_look` | 精确设置材质、PBR / NPR、NPR 预设、滤镜叠加（`filters`：顺序、强度、参数）与总强度、作用范围、环境与程序天空（`sky`：太阳高度 / 方位、云量、霾）、展示模型、体素与精细度、材质参数、三色、NPR 参数，返回完整状态 |
 | `describe_look` | 解析 Cindy 聊天里的一句话调整（复用 `src/nl.js`） |
 | `snapshot` | 截取当前画面给 AI 看，方便它边调边检查 |
 | `read_shader` | 不传 id：自定义 Shader 写法说明 + 全部 Shader 列表；传 id：某个 Shader 的 GLSL 源码当模板；`library`：可平铺函数库的全部签名和返回值 |
@@ -310,7 +312,8 @@ src/
 ├── triplanar.js     三向投影、可平铺处理
 ├── npr.js           NPR 光照模型、描边、PBR → NPR 转换规则
 ├── voxel.js         体素化：表面采样、体素 AO、实例化网格、材质体素补丁
-├── stylize.js       画面滤镜后处理管线
+├── filters.js       画面滤镜注册表：每个滤镜的参数、关键词和 GLSL
+├── stylize.js       画面滤镜后处理管线（按叠加顺序编译成 pass）
 ├── models.js        展示模型（Shader Ball / 球 / 方块）、曲面细分、校色件
 ├── environments.js  HDR 环境
 ├── sky.js           程序天空：天空 shader、太阳颜色、跟随太阳的灯光

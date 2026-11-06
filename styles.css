@@ -1015,3 +1015,19 @@ input[type="range"]::-moz-range-thumb {
 .sky-controls {
   margin-top: 12px;
 }
+
+/* 滤镜叠加顺序角标（叠了 2 个以上才显示） */
+.chips .chip sup {
+  margin-left: 3px;
+  font-size: 10px;
+  line-height: 0;
+  opacity: 0.75;
+}
+
+.chips .chip sup:empty {
+  display: none;
+}
+
+.filter-params:not(:empty) {
+  margin-top: 10px;
+}

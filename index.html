@@ -4,30 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ShaderMaker</title>
-  <link rel="stylesheet" href="./styles.css?v=20261105-sky1" />
+  <link rel="stylesheet" href="./styles.css?v=20261106-flt1" />
   <!-- 本地模块带版本号，避免浏览器拿旧缓存配新页面 -->
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
         "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/",
-        "./src/shaders.js": "./src/shaders.js?v=20261105-sky1",
-        "./src/presets.js": "./src/presets.js?v=20261105-sky1",
-        "./src/npr.js": "./src/npr.js?v=20261105-sky1",
-        "./src/stylize.js": "./src/stylize.js?v=20261105-sky1",
-        "./src/nl.js": "./src/nl.js?v=20261105-sky1",
-        "./src/environments.js": "./src/environments.js?v=20261105-sky1",
-        "./src/sky.js": "./src/sky.js?v=20261105-sky1",
-        "./src/models.js": "./src/models.js?v=20261105-sky1",
-        "./src/voxel.js": "./src/voxel.js?v=20261105-sky1",
-        "./src/triplanar.js": "./src/triplanar.js?v=20261105-sky1",
-        "./src/materialFx.js": "./src/materialFx.js?v=20261105-sky1",
-        "./src/effects.js": "./src/effects.js?v=20261105-sky1",
-        "./src/effectExamples.js": "./src/effectExamples.js?v=20261105-sky1",
-        "./src/store.js": "./src/store.js?v=20261105-sky1",
-        "./src/customShaders.js": "./src/customShaders.js?v=20261105-sky1",
-        "./src/packedHdr.js": "./src/packedHdr.js?v=20261105-sky1",
-        "./src/vendor/tileable-shaders.js": "./src/vendor/tileable-shaders.js?v=20261105-sky1"
+        "./src/shaders.js": "./src/shaders.js?v=20261106-flt1",
+        "./src/presets.js": "./src/presets.js?v=20261106-flt1",
+        "./src/npr.js": "./src/npr.js?v=20261106-flt1",
+        "./src/stylize.js": "./src/stylize.js?v=20261106-flt1",
+        "./src/filters.js": "./src/filters.js?v=20261106-flt1",
+        "./src/nl.js": "./src/nl.js?v=20261106-flt1",
+        "./src/environments.js": "./src/environments.js?v=20261106-flt1",
+        "./src/sky.js": "./src/sky.js?v=20261106-flt1",
+        "./src/models.js": "./src/models.js?v=20261106-flt1",
+        "./src/voxel.js": "./src/voxel.js?v=20261106-flt1",
+        "./src/triplanar.js": "./src/triplanar.js?v=20261106-flt1",
+        "./src/materialFx.js": "./src/materialFx.js?v=20261106-flt1",
+        "./src/effects.js": "./src/effects.js?v=20261106-flt1",
+        "./src/effectExamples.js": "./src/effectExamples.js?v=20261106-flt1",
+        "./src/store.js": "./src/store.js?v=20261106-flt1",
+        "./src/customShaders.js": "./src/customShaders.js?v=20261106-flt1",
+        "./src/packedHdr.js": "./src/packedHdr.js?v=20261106-flt1",
+        "./src/vendor/tileable-shaders.js": "./src/vendor/tileable-shaders.js?v=20261106-flt1"
       }
     }
   </script>
@@ -122,6 +123,7 @@
           </div>
         </div>
         <div id="styles" class="chips"></div>
+        <div id="filter-params" class="sliders filter-params pro-only"></div>
         <div class="row pro-only" title="卡通渲染与画面滤镜的作用范围">
           <span>作用范围</span>
           <div id="scope-modes" class="segmented segmented-mini">
@@ -169,6 +171,6 @@
     </div>
   </aside>
 
-  <script type="module" src="./src/app.js?v=20261105-sky1"></script>
+  <script type="module" src="./src/app.js?v=20261106-flt1"></script>
 </body>
 </html>

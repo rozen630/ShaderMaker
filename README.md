@@ -230,6 +230,9 @@ NPR is not a screen filter: it patches `MeshToonMaterial` and replaces its light
 
 Pixel art / comic / oil paint / sketch / cyber / film / blueprint. NPR is a material shader that knows about normals, lights and shadows; filters are camera post-processing and only see the rendered 2D image. They can be combined. Line-art filters use normal and depth buffers and support voxels and displacement.
 
+- **Stackable filters:** up to three run in order (pixel then film differs from film then pixel), each with its own strength and parameters such as pixel size, dot size, grain and vignette. In Pro, tap chips to add or remove them; badges show the order and each filter gets its own sliders. Lite stays single-select. Chat phrases such as "pixel, then add film" stack filters.
+- **Registry** (`src/filters.js`): each filter is data — name, chat keywords, parameters and a GLSL function `vec3 stylize(uv, src, frag)`. Parameters become uniforms, panel sliders and `set_look.filters` documentation automatically, so a new filter only touches this file.
+
 ---
 
 ## 🖥️ Interface
@@ -261,7 +264,7 @@ Then use Cindy's `ghost_forge_pack` to package `dist/cindy-plugin/` as `shaderma
 
 | AI tool | Purpose |
 |---|---|
-| `set_look` | Set materials, PBR/NPR, NPR presets, filters and strength, scope, environment and procedural sky (`sky`: sun elevation/azimuth, clouds, haze), display model, voxels and detail, material values, colors and NPR parameters; returns the full state |
+| `set_look` | Set materials, PBR/NPR, NPR presets, stacked filters (`filters`: order, strength, parameters) and overall strength, scope, environment and procedural sky (`sky`: sun elevation/azimuth, clouds, haze), display model, voxels and detail, material values, colors and NPR parameters; returns the full state |
 | `describe_look` | Parse a natural-language change from Cindy chat (reuses `src/nl.js`) |
 | `snapshot` | Capture the current view so the assistant can inspect it |
 | `read_shader` | Without an ID: custom shader instructions and list; with an ID: that shader's GLSL source as a template; `library`: signatures and return values for all tiling functions |
@@ -314,7 +317,8 @@ src/
 ├── triplanar.js       Triplanar projection and seamless tiling
 ├── npr.js             NPR lighting, outlines, PBR-to-NPR conversion rules
 ├── voxel.js           Voxelization: surface sampling, voxel AO, instanced mesh, material patches
-├── stylize.js         Screen-space filter post-processing pipeline
+├── filters.js         Filter registry: parameters, keywords and GLSL per filter
+├── stylize.js         Screen-space filter pipeline (compiles the stack into passes)
 ├── models.js          Display models (Shader Ball / sphere / cube), tessellation, calibration parts
 ├── environments.js    HDR environments
 ├── sky.js             Procedural sky: sky shader, sun color, sun-driven lights
