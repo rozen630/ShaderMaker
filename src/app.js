@@ -1,8 +1,5 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
-import { loadPackedHdr } from "./packedHdr.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { vertexShader, shaders, channelShaders } from "./shaders.js";
 import { presets, pbrCategories, shaderCategories, sliderGroups, sliderDefs, shaderPreset } from "./presets.js";
 import {
@@ -20,6 +17,7 @@ import {
 import { interpretPrompt, hintPrompts } from "./nl.js";
 import { environments, defaultEnvironment } from "./environments.js";
 import { createSky, skySliders } from "./sky.js";
+import { ENV_FILE, ENV_ACCEPT, MAX_ENV_BYTES, THUMB_WIDTH, THUMB_HEIGHT, envSliders, decodeEnvironment, analyzeEnvironment, environmentLights } from "./customEnv.js";
 import { createStylizer, MASK_LAYER } from "./stylize.js";
 import { filters, noFilter, MAX_FILTERS } from "./filters.js";
 import { createNpr, nprPresets, nprSliders, defaultNprPreset } from "./npr.js";
@@ -64,6 +62,9 @@ const presetRoot = document.getElementById("presets");
 const presetTitle = document.getElementById("preset-title");
 const envRoot = document.getElementById("environments");
 const skyRoot = document.getElementById("sky-controls");
+const envControlRoot = document.getElementById("env-controls");
+const envSliderRoot = document.getElementById("env-sliders");
+const envFileInput = document.getElementById("env-file");
 const styleRoot = document.getElementById("styles");
 const filterParamRoot = document.getElementById("filter-params");
 const styleAmountInput = document.getElementById("style-amount");
@@ -118,9 +119,6 @@ controls.target.set(0, 1.05, 0);
 controls.update();
 
 const pmrem = new THREE.PMREMGenerator(renderer);
-const hdrLoader = new RGBELoader();
-const envCache = new Map();
-const roomEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const sky = createSky(renderer, pmrem);
 
 const hemi = new THREE.HemisphereLight(0xdde7ff, 0x1a1512, 0.18);
@@ -147,7 +145,7 @@ const rimLight = new THREE.PointLight(0x8ee7c5, 2.2, 10, 2);
 rimLight.position.set(-1.5, 2.3, 2.2);
 scene.add(rimLight);
 
-// 展示方式参照 MaterialX Viewer：模型悬浮在清晰的 HDR 环境前，不放地面、背景板和台座
+// 展示方式参照 MaterialX Viewer：模型悬浮在清晰的环境前，不放地面、背景板和台座
 
 const shaderUniforms = {
   uTime: { value: 0 },
@@ -477,35 +475,36 @@ function applyLight(light, spec) {
   light.position.set(...spec.position);
 }
 
-async function loadEnvironmentMap(url) {
-  if (envCache.has(url)) return envCache.get(url);
-  // .jpg 是插件包里压缩过的 HDR（src/packedHdr.js），.hdr 是 Poly Haven 原文件
-  const load = url.endsWith(".jpg") ? loadPackedHdr(url) : hdrLoader.loadAsync(url);
-  const pending = load.then((texture) => {
-    texture.mapping = THREE.EquirectangularReflectionMapping;
-    const envMap = pmrem.fromEquirectangular(texture).texture;
-    texture.dispose();
-    envCache.set(url, envMap);
-    return envMap;
-  });
-  envCache.set(url, pending);
-  return pending;
-}
-
 function applyEnvironmentRotation(radians) {
   if (scene.environmentRotation) scene.environmentRotation.set(0, radians, 0);
   if (scene.backgroundRotation) scene.backgroundRotation.set(0, radians, 0);
 }
 
-let currentEnvMap = null;
-// 程序天空的平涂底色随太阳变化，其它环境用固定底色
-let skyFlatColor = environments.sky.background;
+// ---- 环境：内置只有程序天空（src/sky.js），其它都是用户上传的全景图（src/customEnv.js），存在本机浏览器里 ----
 
-// NPR 下背景用环境的平涂底色，照片 HDR 背景和卡通主体放一起会很突兀
+const customEnvs = new Map();
+// 上传环境图的 PMREM 贴图（id → Promise），切回来不用重新解析
+const envMaps = new Map();
+const envChannel = new BroadcastChannel("shadermaker-environments");
+
+let currentEnvMap = null;
+// 卡通全局模式的平涂底色：程序天空按太阳算，上传的图取地平线附近的颜色
+let envFlatColor = environments.sky.background;
+
+// NPR 下背景用环境的平涂底色，照片背景和卡通主体放一起会很突兀
 function applyBackground() {
-  const env = environments[state.environment];
   const flat = state.render === "npr" && state.scope === "global";
-  scene.background = !flat && currentEnvMap ? currentEnvMap : new THREE.Color(env.procedural ? skyFlatColor : env.background);
+  scene.background = !flat && currentEnvMap ? currentEnvMap : new THREE.Color(envFlatColor);
+}
+
+function applyLights(lights) {
+  renderer.toneMappingExposure = lights.exposure;
+  applyLight(keyLight, lights.key);
+  applyLight(fillLight, lights.fill);
+  applyLight(rimLight, lights.rim);
+  npr.setLightReference(keyLight);
+  hemi.intensity = lights.hemi;
+  envFlatColor = lights.flat;
 }
 
 // 程序天空：重画天空和环境贴图，灯光 / 曝光跟着太阳（src/sky.js）
@@ -513,59 +512,170 @@ function applySky(values) {
   if (values) sky.set(values);
   if (state.environment !== "sky") return;
   const result = sky.render();
-  const { lights } = result;
-  renderer.toneMappingExposure = lights.exposure;
-  applyLight(keyLight, lights.key);
-  applyLight(fillLight, lights.fill);
-  applyLight(rimLight, lights.rim);
-  npr.setLightReference(keyLight);
-  hemi.intensity = lights.hemi;
-  skyFlatColor = lights.flat;
+  applyLights(result.lights);
   scene.environment = result.environment;
   currentEnvMap = result.background;
   applyEnvironmentRotation(0);
   applyBackground();
+  refreshRenderState();
   syncSkyControls();
 }
 
+function loadCustomEnvMap(meta) {
+  if (!envMaps.has(meta.id)) {
+    const pending = (async () => {
+      const record = await loadRecord("environmentData", meta.id);
+      if (!record?.data) throw new Error("环境图不在本机存储里了");
+      const { texture } = await decodeEnvironment(record.data, `${meta.name}.${meta.ext}`);
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      const envMap = pmrem.fromEquirectangular(texture).texture;
+      texture.image?.close?.();
+      texture.dispose();
+      return envMap;
+    })();
+    envMaps.set(meta.id, pending);
+    pending.catch(() => envMaps.delete(meta.id));
+  }
+  return envMaps.get(meta.id);
+}
+
+// 上传的环境：灯光按导入时的分析结果 + 用户的旋转 / 曝光配（customEnv.js environmentLights）
+function applyCustomEnvironment(meta) {
+  applyLights(environmentLights(meta.analysis, meta));
+  applyEnvironmentRotation(THREE.MathUtils.degToRad(meta.rotation));
+  applyBackground();
+  refreshRenderState();
+  syncEnvControls();
+}
+
 async function setEnvironment(id) {
-  const env = environments[id] || environments[defaultEnvironment];
-  state.environment = env.id;
-  if (skyRoot) skyRoot.hidden = !env.procedural;
-  if (env.procedural) {
+  const meta = customEnvs.get(id);
+  if (skyRoot) skyRoot.hidden = Boolean(meta);
+  if (envControlRoot) envControlRoot.hidden = !meta;
+  if (!meta) {
+    state.environment = "sky";
     applySky();
-    refreshRenderState();
     highlightEnvironment();
     setCompileState(true, "ready");
     return;
   }
-  currentEnvMap = null;
-  applyBackground();
-  renderer.toneMappingExposure = env.exposure;
-  applyLight(keyLight, env.key);
-  applyLight(fillLight, env.fill);
-  applyLight(rimLight, env.rim);
-  npr.setLightReference(keyLight);
-  hemi.intensity = env.hemi;
-  refreshRenderState();
-  applyEnvironmentRotation(env.rotation);
+  state.environment = meta.id;
   highlightEnvironment();
+  syncEnvControls();
+  setCompileState(true, "loading");
   try {
-    const envMap = await loadEnvironmentMap(env.hdr);
-    if (state.environment !== env.id) return;
+    const envMap = await loadCustomEnvMap(meta);
+    if (state.environment !== meta.id) return;
     scene.environment = envMap;
     currentEnvMap = envMap;
-    applyBackground();
-    applyEnvironmentRotation(env.rotation);
+    applyCustomEnvironment(meta);
     setCompileState(true, "ready");
   } catch (error) {
-    console.warn("HDR environment failed", error);
-    scene.environment = roomEnv;
-    currentEnvMap = null;
-    applyBackground();
-    applyEnvironmentRotation(0);
-    setCompileState(false, "hdr fallback");
+    logEl.textContent = `环境图加载失败：${error.message}`;
+    setCompileState(false, "env error");
+    await setEnvironment("sky");
   }
+}
+
+// 改当前上传环境的旋转 / 曝光；persist = false 时只改画面（拖滑条过程中），松手再存
+function setEnvOptions(values, persist = true) {
+  const meta = customEnvs.get(state.environment);
+  if (!meta) return null;
+  for (const def of envSliders) {
+    const value = Number(values[def.key]);
+    if (values[def.key] !== undefined && Number.isFinite(value)) meta[def.key] = THREE.MathUtils.clamp(value, def.min, def.max);
+  }
+  if (currentEnvMap) applyCustomEnvironment(meta);
+  if (persist) saveRecord("environments", meta).then(() => envChannel.postMessage({ type: "changed" }));
+  return { rotation: meta.rotation, exposure: meta.exposure };
+}
+
+// 导入：检查大小和格式 → 解析、分析（不合格不存）→ 存进本机 → 切过去
+async function importEnvironment(data, name) {
+  if (!(data instanceof ArrayBuffer) || !data.byteLength) throw new Error("文件是空的");
+  if (data.byteLength > MAX_ENV_BYTES) throw new Error(`环境图太大（上限 ${MAX_ENV_BYTES / 1048576} MB）`);
+  const ext = String(name || "").toLowerCase().match(ENV_FILE)?.[1];
+  if (!ext) throw new Error("只支持 .hdr / .exr / .jpg / .png / .webp 全景图");
+  setCompileState(true, "loading");
+  let decoded;
+  try {
+    decoded = await decodeEnvironment(data, name);
+  } catch (error) {
+    setCompileState(false, "env error");
+    throw error;
+  }
+  const analysis = analyzeEnvironment(decoded);
+  decoded.texture.image?.close?.();
+  decoded.texture.dispose();
+  const id = `env-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const meta = {
+    id,
+    name: String(name).replace(ENV_FILE, "").slice(0, 32) || "环境",
+    ext,
+    bytes: data.byteLength,
+    width: decoded.width,
+    height: decoded.height,
+    analysis,
+    rotation: 0,
+    exposure: 0,
+    createdAt: Date.now(),
+  };
+  await saveRecord("environmentData", { id, data });
+  await saveRecord("environments", meta);
+  customEnvs.set(id, meta);
+  renderEnvironments();
+  envChannel.postMessage({ type: "changed" });
+  await setEnvironment(id);
+  const ratio = decoded.width / decoded.height;
+  logEl.textContent = `已导入环境 ${meta.name}（${decoded.width}×${decoded.height}${Math.abs(ratio - 2) > 0.05 ? "，不是 2:1 的全景图，可能会变形" : ""}）`;
+  return { id, name: meta.name, width: decoded.width, height: decoded.height, kind: analysis.kind };
+}
+
+async function deleteEnvironment(id) {
+  const meta = customEnvs.get(id);
+  if (!meta) throw new Error(id === "sky" ? "程序天空不能删除" : `没有这个环境：${id}`);
+  if (state.environment === id) await setEnvironment("sky");
+  await removeRecord("environments", id);
+  await removeRecord("environmentData", id);
+  customEnvs.delete(id);
+  const map = envMaps.get(id);
+  envMaps.delete(id);
+  map?.then((texture) => texture.dispose()).catch(() => {});
+  renderEnvironments();
+  envChannel.postMessage({ type: "changed" });
+  logEl.textContent = `已删除环境：${meta.name}`;
+  return { deleted: id };
+}
+
+async function reloadCustomEnvironments() {
+  customEnvs.clear();
+  for (const meta of await loadAll("environments")) customEnvs.set(meta.id, meta);
+  renderEnvironments();
+  if (state.environment !== "sky" && !customEnvs.has(state.environment)) await setEnvironment("sky");
+  else if (customEnvs.has(state.environment) && currentEnvMap) applyCustomEnvironment(customEnvs.get(state.environment));
+}
+
+async function importEnvironmentFile(file) {
+  if (!file) return;
+  try {
+    await importEnvironment(await file.arrayBuffer(), file.name);
+  } catch (error) {
+    logEl.textContent = `导入失败：${error.message}`;
+    setCompileState(false, "env error");
+  }
+}
+
+function initEnvironmentImport() {
+  envFileInput?.setAttribute("accept", ENV_ACCEPT);
+  envFileInput?.addEventListener("change", () => {
+    importEnvironmentFile(envFileInput.files[0]);
+    envFileInput.value = "";
+  });
+  document.getElementById("env-delete")?.addEventListener("click", () => {
+    deleteEnvironment(state.environment).catch((error) => (logEl.textContent = error.message));
+  });
+  envChannel.addEventListener("message", () => reloadCustomEnvironments());
+  return reloadCustomEnvironments();
 }
 
 function highlightEnvironment() {
@@ -1363,9 +1473,12 @@ function initModelImport() {
     event.preventDefault();
     depth = 0;
     viewport.classList.remove("drop-target");
-    const file = [...(event.dataTransfer?.files || [])].find((item) => /\.(glb|gltf)$/i.test(item.name));
-    if (file) importFile(file);
-    else if (event.dataTransfer?.files?.length) logEl.textContent = "只支持 .glb / .gltf 模型";
+    const files = [...(event.dataTransfer?.files || [])];
+    const model = files.find((item) => /\.(glb|gltf)$/i.test(item.name));
+    const env = files.find((item) => ENV_FILE.test(item.name));
+    if (model) importFile(model);
+    else if (env) importEnvironmentFile(env);
+    else if (files.length) logEl.textContent = "只支持 .glb / .gltf 模型，或 .hdr / .exr / .jpg / .png / .webp 全景环境图";
   });
   modelChannel.addEventListener("message", () => reloadImportedModels());
   reloadImportedModels();
@@ -1623,24 +1736,100 @@ function syncSkyControls() {
   }
 }
 
+// 上传环境的旋转 / 曝光滑条（选中上传的环境时才显示）
+function renderEnvControls() {
+  if (!envSliderRoot) return;
+  envSliderRoot.innerHTML = "";
+  for (const def of envSliders) {
+    const wrap = document.createElement("div");
+    wrap.className = "slider";
+    wrap.innerHTML = `
+      <label>
+        <b>${def.label}</b>
+        <span data-env="${def.key}"></span>
+      </label>
+      <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" data-env="${def.key}" />
+    `;
+    const input = wrap.querySelector("input");
+    input.addEventListener("input", () => setEnvOptions({ [def.key]: Number(input.value) }, false));
+    input.addEventListener("change", () => setEnvOptions({ [def.key]: Number(input.value) }));
+    envSliderRoot.append(wrap);
+  }
+  syncEnvControls();
+}
+
+function syncEnvControls() {
+  const meta = customEnvs.get(state.environment);
+  if (!envSliderRoot || !meta) return;
+  const title = document.getElementById("env-name");
+  if (title) title.textContent = `${meta.name} · ${meta.width}×${meta.height}`;
+  for (const def of envSliders) {
+    const value = meta[def.key];
+    const input = envSliderRoot.querySelector(`input[data-env="${def.key}"]`);
+    const label = envSliderRoot.querySelector(`span[data-env="${def.key}"]`);
+    if (input) {
+      input.value = String(value);
+      paintRange(input);
+    }
+    if (label) label.textContent = def.step >= 1 ? `${Math.round(value)}${def.suffix}` : `${value > 0 ? "+" : ""}${value.toFixed(1)}${def.suffix}`;
+  }
+}
+
+// 缩略图画在 canvas 上（插件页面的 CSP 不允许 data: 图片）
+function environmentThumb(meta) {
+  const canvas = document.createElement("canvas");
+  canvas.width = THUMB_WIDTH;
+  canvas.height = THUMB_HEIGHT;
+  const image = new ImageData(THUMB_WIDTH, THUMB_HEIGHT);
+  const thumb = meta.analysis.thumb;
+  for (let i = 0, j = 0; i < image.data.length; i += 4, j += 3) {
+    image.data[i] = thumb[j];
+    image.data[i + 1] = thumb[j + 1];
+    image.data[i + 2] = thumb[j + 2];
+    image.data[i + 3] = 255;
+  }
+  canvas.getContext("2d").putImageData(image, 0, 0);
+  return canvas;
+}
+
 function renderEnvironments() {
   if (!envRoot) return;
   envRoot.innerHTML = "";
-  for (const env of Object.values(environments)) {
+  const add = (id, name, swatch, onClick, title = name) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chip";
-    button.dataset.id = env.id;
-    // 色块：主光颜色 → 环境底色，一眼看出冷暖
-    const key = `#${env.key.color.toString(16).padStart(6, "0")}`;
-    const base = `#${env.background.toString(16).padStart(6, "0")}`;
-    button.innerHTML = `<i style="background:linear-gradient(135deg, ${key}, ${base} 70%)"></i><span>${env.name}</span>`;
-    button.addEventListener("click", () => {
-      setEnvironment(env.id);
-      logEl.textContent = `环境切到 ${env.name}`;
-    });
+    if (id) button.dataset.id = id;
+    button.title = title;
+    const icon = document.createElement("i");
+    swatch(icon);
+    const label = document.createElement("span");
+    label.textContent = name;
+    button.append(icon, label);
+    button.addEventListener("click", onClick);
     envRoot.append(button);
+  };
+  const sky = environments.sky;
+  add(sky.id, sky.name, (icon) => {
+    // 色块：主光颜色 → 天空底色
+    const key = `#${sky.key.color.toString(16).padStart(6, "0")}`;
+    const base = `#${sky.background.toString(16).padStart(6, "0")}`;
+    icon.style.background = `linear-gradient(135deg, ${key}, ${base} 70%)`;
+  }, () => {
+    setEnvironment(sky.id);
+    logEl.textContent = `环境切到 ${sky.name}`;
+  });
+  for (const meta of customEnvs.values()) {
+    add(meta.id, meta.name, (icon) => icon.append(environmentThumb(meta)), () => {
+      setEnvironment(meta.id);
+      logEl.textContent = `环境切到 ${meta.name}`;
+    }, `${meta.name} · ${meta.width}×${meta.height} · ${(meta.bytes / 1048576).toFixed(1)} MB`);
   }
+  add(null, "上传", (icon) => {
+    icon.className = "env-upload";
+    icon.textContent = "+";
+  }, () => envFileInput?.click(), "上传全景环境图：.hdr / .exr / .jpg / .png / .webp，也可以直接拖到画面上");
+  highlightEnvironment();
 }
 
 function rgbCss(rgb) {
@@ -2084,6 +2273,7 @@ document.getElementById("mode-tabs")?.addEventListener("click", (event) => {
 setTier(state.tier);
 renderEnvironments();
 renderSkyControls();
+renderEnvControls();
 renderStyles();
 renderChannels();
 renderNprPresets();
@@ -2091,6 +2281,7 @@ renderDisplayModels();
 initVoxelControls();
 initEffects();
 initModelImport();
+initEnvironmentImport();
 setFilters([]);
 setNprPreset(defaultNprPreset, false);
 setRender("pbr");
@@ -2142,7 +2333,11 @@ function getState() {
     styleAmount: round(Number(styleAmountInput?.value ?? 1)),
     scope: state.scope,
     environment: state.environment,
+    environmentName: state.environment === "sky" ? environments.sky.name : customEnvs.get(state.environment)?.name,
     sky: state.environment === "sky" ? Object.fromEntries(skySliders.map((def) => [def.key, round(sky.values[def.key])])) : undefined,
+    envRotation: customEnvs.get(state.environment)?.rotation,
+    envExposure: customEnvs.get(state.environment)?.exposure,
+    customEnvironments: [...customEnvs.values()].map((meta) => ({ id: meta.id, name: meta.name, width: meta.width, height: meta.height })),
     displayModel: state.displayModel,
     model: {
       id: state.displayModel,
@@ -2200,7 +2395,13 @@ async function setLook(look = {}) {
     if (look.scope === "subject" || look.scope === "global") setScope(look.scope);
     else warnings.push(`未知的作用范围：${look.scope}`);
   }
-  const environment = pick(look.environment, environments, "环境");
+  // 环境：sky（程序天空），或上传环境的 id / 名字
+  let environment = null;
+  if (look.environment) {
+    const wanted = String(look.environment);
+    environment = wanted === "sky" ? "sky" : customEnvs.has(wanted) ? wanted : [...customEnvs.values()].find((meta) => meta.name === wanted)?.id;
+    if (!environment) warnings.push(`未知的环境：${wanted}`);
+  }
   // sky：程序天空参数；只传它时自动切到程序天空
   if (look.sky && typeof look.sky === "object") {
     const known = new Set(skySliders.map((def) => def.key));
@@ -2210,6 +2411,11 @@ async function setLook(look = {}) {
   }
   if (environment) await setEnvironment(environment);
   else if (look.sky && typeof look.sky === "object") await setEnvironment("sky");
+  // 上传环境的旋转（度）/ 曝光（EV）
+  if (look.envRotation !== undefined || look.envExposure !== undefined) {
+    if (!customEnvs.has(state.environment)) warnings.push("envRotation / envExposure 只对上传的环境生效");
+    else setEnvOptions({ rotation: look.envRotation, exposure: look.envExposure });
+  }
   // 展示模型：内置 id、导入模型的 id，或导入模型的名字
   if (look.displayModel) {
     const wanted = String(look.displayModel);
@@ -2648,6 +2854,26 @@ export const shaderMaker = {
   },
   async deleteModel({ id } = {}) {
     const result = await deleteModel(String(id || ""));
+    return { ...result, state: getState() };
+  },
+  // AI 导入环境图：同 importModelFrom，插件后台先把图片下载进媒体库
+  async importEnvironmentFrom({ urls = [], name } = {}) {
+    let lastError = "";
+    for (const url of urls) {
+      const response = await fetch(url).catch((error) => ({ ok: false, statusText: error.message }));
+      if (!response.ok) {
+        lastError = `${url}：${response.status || ""} ${response.statusText || ""}`;
+        continue;
+      }
+      const ext = url.match(/\.(\w+)$/)?.[1] || "jpg";
+      const fileName = ENV_FILE.test(String(name || "")) ? name : `${name || "环境"}.${ext}`;
+      const result = await importEnvironment(await response.arrayBuffer(), fileName);
+      return { ...result, state: getState() };
+    }
+    throw new Error(`读不到下载好的环境图（${lastError}）`);
+  },
+  async deleteEnvironment({ id } = {}) {
+    const result = await deleteEnvironment(String(id || ""));
     return { ...result, state: getState() };
   },
 };

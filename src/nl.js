@@ -421,15 +421,12 @@ export function interpretPrompt(raw, state) {
   }
 
   let environment = state.environment;
-  // 时间 / 天气词调程序天空：已经在程序天空、句子里提到天空，或这个词不是某张 HDR 的关键词（「多云」「正午」）时生效；
-  // 否则「黄昏」「夜晚」照旧切到对应的 HDR 环境
+  // 时间 / 天气词（「黄昏」「多云」「正午」）调程序天空，不在天空时切过去
   let sky;
-  const hdrKeys = new Set(Object.values(environments).filter((env) => !env.procedural).flatMap((env) => env.keys));
-  const skyNamed = environments.sky.keys.some((key) => text.includes(key));
   const skyHits = skyPhrases
     .map((phrase) => ({ phrase, key: phrase.keys.find((key) => text.includes(key)) }))
     .filter((hit) => hit.key);
-  if (skyHits.length && (skyNamed || state.environment === "sky" || skyHits.some((hit) => !hdrKeys.has(hit.key)))) {
+  if (skyHits.length) {
     sky = Object.assign({}, ...skyHits.map((hit) => hit.phrase.values));
     if (environment !== "sky") notes.push(`环境切到 ${environments.sky.name}`);
     environment = "sky";

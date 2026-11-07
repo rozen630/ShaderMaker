@@ -4,31 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ShaderMaker</title>
-  <link rel="stylesheet" href="./styles.css?v=20261106-flt1" />
+  <link rel="stylesheet" href="./styles.css?v=20261106-env1" />
   <!-- 本地模块带版本号，避免浏览器拿旧缓存配新页面 -->
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
         "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/",
-        "./src/shaders.js": "./src/shaders.js?v=20261106-flt1",
-        "./src/presets.js": "./src/presets.js?v=20261106-flt1",
-        "./src/npr.js": "./src/npr.js?v=20261106-flt1",
-        "./src/stylize.js": "./src/stylize.js?v=20261106-flt1",
-        "./src/filters.js": "./src/filters.js?v=20261106-flt1",
-        "./src/nl.js": "./src/nl.js?v=20261106-flt1",
-        "./src/environments.js": "./src/environments.js?v=20261106-flt1",
-        "./src/sky.js": "./src/sky.js?v=20261106-flt1",
-        "./src/models.js": "./src/models.js?v=20261106-flt1",
-        "./src/voxel.js": "./src/voxel.js?v=20261106-flt1",
-        "./src/triplanar.js": "./src/triplanar.js?v=20261106-flt1",
-        "./src/materialFx.js": "./src/materialFx.js?v=20261106-flt1",
-        "./src/effects.js": "./src/effects.js?v=20261106-flt1",
-        "./src/effectExamples.js": "./src/effectExamples.js?v=20261106-flt1",
-        "./src/store.js": "./src/store.js?v=20261106-flt1",
-        "./src/customShaders.js": "./src/customShaders.js?v=20261106-flt1",
-        "./src/packedHdr.js": "./src/packedHdr.js?v=20261106-flt1",
-        "./src/vendor/tileable-shaders.js": "./src/vendor/tileable-shaders.js?v=20261106-flt1"
+        "./src/shaders.js": "./src/shaders.js?v=20261106-env1",
+        "./src/presets.js": "./src/presets.js?v=20261106-env1",
+        "./src/npr.js": "./src/npr.js?v=20261106-env1",
+        "./src/stylize.js": "./src/stylize.js?v=20261106-env1",
+        "./src/filters.js": "./src/filters.js?v=20261106-env1",
+        "./src/nl.js": "./src/nl.js?v=20261106-env1",
+        "./src/environments.js": "./src/environments.js?v=20261106-env1",
+        "./src/sky.js": "./src/sky.js?v=20261106-env1",
+        "./src/models.js": "./src/models.js?v=20261106-env1",
+        "./src/voxel.js": "./src/voxel.js?v=20261106-env1",
+        "./src/triplanar.js": "./src/triplanar.js?v=20261106-env1",
+        "./src/materialFx.js": "./src/materialFx.js?v=20261106-env1",
+        "./src/effects.js": "./src/effects.js?v=20261106-env1",
+        "./src/effectExamples.js": "./src/effectExamples.js?v=20261106-env1",
+        "./src/store.js": "./src/store.js?v=20261106-env1",
+        "./src/customShaders.js": "./src/customShaders.js?v=20261106-env1",
+        "./src/customEnv.js": "./src/customEnv.js?v=20261106-env1",
+        "./src/vendor/tileable-shaders.js": "./src/vendor/tileable-shaders.js?v=20261106-env1"
       }
     }
   </script>
@@ -111,7 +111,12 @@
       <section class="section">
         <h2>环境</h2>
         <div id="environments" class="swatches"></div>
+        <input id="env-file" type="file" hidden />
         <div id="sky-controls" class="sliders sky-controls" hidden></div>
+        <div id="env-controls" class="env-controls" hidden>
+          <div class="row"><span id="env-name"></span><button id="env-delete" type="button" class="text-button">删除环境</button></div>
+          <div id="env-sliders" class="sliders"></div>
+        </div>
       </section>
 
       <section class="section">
@@ -171,6 +176,6 @@
     </div>
   </aside>
 
-  <script type="module" src="./src/app.js?v=20261106-flt1"></script>
+  <script type="module" src="./src/app.js?v=20261106-env1"></script>
 </body>
 </html>

@@ -20,7 +20,7 @@ export const skyPhrases = [
   { keys: ["上午", "下午", "afternoon", "morning"], values: { sunElevation: 35 }, note: "白天" },
   { keys: ["黄昏", "日落", "傍晚", "golden hour", "sunset", "dusk"], values: { sunElevation: 3, sunAzimuth: 290 }, note: "黄昏" },
   { keys: ["暮光", "蓝调", "twilight", "blue hour"], values: { sunElevation: -4 }, note: "暮光" },
-  { keys: ["夜晚", "夜里", "深夜", "黑夜", "night"], values: { sunElevation: -12 }, note: "夜晚" },
+  { keys: ["夜晚", "夜景", "夜里", "深夜", "黑夜", "night"], values: { sunElevation: -12 }, note: "夜晚" },
   { keys: ["晴朗", "晴天", "万里无云", "clear sky", "sunny"], values: { cloud: 0.05, haze: 0.1 }, note: "晴朗" },
   { keys: ["多云", "cloudy"], values: { cloud: 0.55 }, note: "多云" },
   { keys: ["阴天", "乌云", "overcast"], values: { cloud: 0.95, haze: 0.45 }, note: "阴天" },

@@ -189,8 +189,9 @@ AI 工具：`read_effect`（写法说明 / 读范例）、`write_effect`（编�
 
 ### 写实 PBR
 - 直射光来自 Key / Fill 方向光、Rim 点光和半球光，Key Light 开启阴影。
-- HDR 经 PMREM 写入 `scene.environment`，提供 IBL 间接漫反射和镜面反射（不是动态多次反弹 GI）。
-- **程序天空**（`src/sky.js`）：不用 HDR，按太阳高度 / 方位、云量、霾画出天空（暮色、太阳光晕、云、星星和月亮），渲染成立方体贴图当背景，再经 PMREM 做环境光。Key Light 就是太阳，颜色按大气透射估算（越低越橙），太阳落下后换成冷色月光；曝光、Fill、Rim 跟着变。聊天里说「黄昏」「阴天」「正午，晴朗」会直接调天空。这是视觉近似，不是物理大气积分。
+- 环境经 PMREM 写入 `scene.environment`，提供 IBL 间接漫反射和镜面反射（不是动态多次反弹 GI）。
+- **程序天空**（`src/sky.js`）：不用 HDR，按太阳高度 / 方位、云量、霾画出天空（暮色、太阳光晕、云、星星和月亮），渲染成立方体贴图当背景，再经 PMREM 做环境光。Key Light 就是太阳，颜色按大气透射估算（越低越橙），太阳落下后换成冷色月光；曝光、Fill、Rim 跟着变。聊天里说「黄昏」「阴天」「正午，晴朗」会直接调天空。这是视觉近似，不是物理大气积分。默认环境就是它。
+- **上传环境图**（`src/customEnv.js`）：面板「环境」里点「上传」或直接拖到画面上，支持 `.hdr` / `.exr` 和 2:1 全景的 JPG / PNG / WebP，存在本机浏览器里（上限 100 MB）。导入时自动分析：最亮的一块当 Key Light（方向、颜色，强度按它占整张图能量的比例），平均亮度定一个温和的自动曝光；选中后可调旋转（主光跟着转）和曝光补偿。AI 可用 `import_environment` 从网址导入 JPG / PNG / WebP（`.hdr` / `.exr` 只能在页面上传，Cindy 媒体库不收），`delete_environment` 删除，`set_look` 的 `environment` 传 id 或名字、`envRotation` / `envExposure` 微调。
 - Surface Shader 分别输出 Base Color、AO / Roughness / Metalness、Normal、Emissive，法线由各材质自己的高度函数生成。
 
 ### 卡通 NPR · 赛璐璐 / 二次元 / 厚涂
@@ -237,7 +238,7 @@ NPR 是材质 Shader，着色时就知道法线、光源和阴影；滤镜是相
 - **Pro**：全部参数（按基础 / 表层 / 体积分组）、材质分类筛选、滤镜强度、作用范围、通道检查。
 - 两种模式共用同一份材质和设置，切换不丢状态。哪些滑条属于 Lite 由 `src/presets.js` / `src/npr.js` 里的 `lite: true` 决定。
 
-**展示**参照 MaterialX Viewer：模型悬浮在清晰的 HDR 环境前（摄影棚 / 日落 / 夜景 / 户外 HDR，或程序天空），不放地面和台座，不自动旋转，拖动画面查看。
+**展示**参照 MaterialX Viewer：模型悬浮在清晰的环境前（程序天空，或自己上传的环境图），不放地面和台座，不自动旋转，拖动画面查看。
 
 - **Shader Ball**（默认）：外壳挂当前材质；内芯色环和灰底盘是校色参照，任何模式下都保持写实。
 - **球 / 方块**（圆角）：和 Shader Ball 共用同一个取景框。
@@ -267,13 +268,14 @@ npm run build:plugin      # → dist/cindy-plugin/
 | `write_shader` | AI 直接写 GLSL 新建 / 修改自定义 Shader，先编译检查，失败返回带行号的错误，通过后加入「自定义」分组 |
 | `delete_shader` | 删除自定义 Shader（内置的不能删） |
 | `import_model` / `delete_model` | 从 HTTPS 地址导入 GLB 模型 / 删除导入的模型，见「导入自己的模型」 |
+| `import_environment` / `delete_environment` | 从 HTTPS 地址导入全景环境图（JPG / PNG / WebP）/ 删除上传的环境 |
 | `read_effect` / `write_effect` / `delete_effect` | 可编程效果：读写法说明和范例、写入（编译检查）、删除，见「可编程效果」 |
 
 - 没有打开的 ShaderMaker 页面时，会自动在当前任务的右侧栏打开任务页（首次加载约 2 秒）。
 - 同一份页面有两个入口：主视图（`mainView`）和任务页（`taskView`）。可能同时开着好几份，后台按「当前任务的任务页 → 主视图 → 其它」选一份执行，不会重复执行。
 - **打包时的改动**（插件页面 CSP 只允许包内脚本，且不能联网）：
   - esbuild 把 `src/` 与 three.js 打成一个 `app.js`，替代 importmap（内联脚本会被 CSP 拦截）。
-  - HDR 打进包里，压缩成「底图 JPEG + 增益 PNG」（`cindy-plugin/hdrPack.mjs`），页面加载时还原成 HDR（`src/packedHdr.js`）。2k 的 4 张只有约 3.7 MB，比原来 1k 的 `.hdr` 还小，亮部（太阳、路灯）的颜色和能量误差控制在 2.5% 以内；网页版仍直接加载 Poly Haven 的 `.hdr`。
+  - 包里不放环境图：内置环境只有程序天空，其它由用户上传，插件包约 2.3 MB。
   - 展示模型做顶点量化（`cindy-plugin/modelPack.mjs`，three.js 原生支持，不需要解码器），压缩后从 1.36 MB 减到 0.9 MB。
   - 整包约 4.9 MB（原来 6.8 MB，上限 8 MB）。
   - `ghost.json` 由 `cindy-plugin/manifest.mjs` 生成，工具参数的可选项读自现有数据，新增材质、滤镜、环境不用改插件代码。
@@ -293,7 +295,7 @@ read_shader（看写法）→ write_shader（提交 GLSL）→ 编译失败？�
 - **存储**：存在这台电脑的浏览器存储（IndexedDB）里，主视图和任务页共用、实时同步，重开页面还在。**不跟着换电脑**，也不进 git。
 - **收进内置库**：好用的自定义 Shader，把代码和预设搬进 `src/shaders.js` / `src/presets.js`，提交后就随插件发布、所有电脑都有。
 
-材质库变大不用担心包体积：58 个 Shader 的源码只有约 66 KB（压缩后约 17 KB），插件包的大头是 4 张 HDR（8.3 MB 未压缩）和 Shader Ball 模型（2.4 MB）。实现见 `src/customShaders.js`。
+材质库变大不用担心包体积：58 个 Shader 的源码只有约 66 KB（压缩后约 17 KB），插件包的大头是 Shader Ball 模型（2.4 MB，打包时量化压缩）。实现见 `src/customShaders.js`。
 
 ---
 
@@ -315,7 +317,8 @@ src/
 ├── filters.js       画面滤镜注册表：每个滤镜的参数、关键词和 GLSL
 ├── stylize.js       画面滤镜后处理管线（按叠加顺序编译成 pass）
 ├── models.js        展示模型（Shader Ball / 球 / 方块）、曲面细分、校色件
-├── environments.js  HDR 环境
+├── environments.js  内置环境（只有程序天空）
+├── customEnv.js     上传环境图：解析 .hdr / .exr / 图片，分析主光和曝光
 ├── sky.js           程序天空：天空 shader、太阳颜色、跟随太阳的灯光
 ├── nl.js            自然语言解析
 └── vendor/          tileable-shaders（MIT）
@@ -332,4 +335,3 @@ cindy-plugin/        page.js（页面入口）· main.js（插件后台）· man
 
 - `assets/models/materialx-shaderball.glb`：MaterialX Viewer 的默认 Shader Ball，来自 [AcademySoftwareFoundation/MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX/tree/main/resources/Geometry)，Apache License 2.0，授权原文见 `assets/models/MATERIALX-LICENSE.txt`。内芯色环由 ShaderMaker 程序生成，不是原始资源的一部分；插件版的模型做了顶点量化。
 - `src/vendor/tileable-shaders.js`：[tuxalin/procedural-tileable-shaders](https://github.com/tuxalin/procedural-tileable-shaders)（MIT，授权原文见 `src/vendor/TILEABLE-SHADERS-LICENSE.txt`）。新版 Shader 用到其中的可平铺噪声、Voronoi、裂纹、六边形、编织、Domain Warping。原库有几处类型错误编译不过，做了最小修补，改动处标了「ShaderMaker」。
-- HDR 环境：[Poly Haven](https://polyhaven.com/hdris)（CC0）。网页版运行时从 Poly Haven CDN 加载 2k 版本，Cindy 插件版把 2k 版本压缩后打进包里。
