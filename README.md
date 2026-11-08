@@ -192,8 +192,9 @@ Live thumbnail cards; Pro mode can filter by category (`shaderCategories` in `sr
 ### Realistic PBR
 
 - Direct light comes from Key/Fill directional lights, a Rim point light and hemisphere light. Key Light casts shadows.
-- HDR is processed with PMREM into `scene.environment` for image-based indirect diffuse and specular lighting (not dynamic multi-bounce global illumination).
-- **Procedural sky** (`src/sky.js`): no HDR. Sun elevation/azimuth, cloud cover and haze drive the sky (twilight, sun glow, clouds, stars and moon). It is rendered to a cubemap for the background and through PMREM for lighting. Key Light is the sun, tinted by an atmospheric-transmittance estimate (more orange near the horizon), and becomes cool moonlight after sunset; exposure, Fill and Rim follow. Chat phrases such as "dusk", "overcast" or "noon, clear" adjust it directly. It is a visual approximation, not a physical atmosphere integration.
+- The environment is processed with PMREM into `scene.environment` for image-based indirect diffuse and specular lighting (not dynamic multi-bounce global illumination).
+- **Procedural sky** (`src/sky.js`): no HDR. Sun elevation/azimuth, cloud cover and haze drive the sky (twilight, sun glow, clouds, stars and moon). It is rendered to a cubemap for the background and through PMREM for lighting. Key Light is the sun, tinted by an atmospheric-transmittance estimate (more orange near the horizon), and becomes cool moonlight after sunset; exposure, Fill and Rim follow. Chat phrases such as "dusk", "overcast" or "noon, clear" adjust it directly. It is a visual approximation, not a physical atmosphere integration. It is the default environment.
+- **Uploaded environments** (`src/customEnv.js`): click Upload under Environment or drag a file onto the canvas. `.hdr`, `.exr` and 2:1 JPG/PNG/WebP panoramas are supported and stored in this browser (up to 100 MB). On import the brightest region becomes Key Light (direction, color, and strength from its share of total energy) and the average brightness sets a gentle auto exposure; rotation (the key light follows) and exposure compensation can be adjusted afterwards. The assistant can import JPG/PNG/WebP from a URL with `import_environment` (`.hdr`/`.exr` must be uploaded on the page because Cindy's media library does not accept them), remove one with `delete_environment`, and select or adjust one through `set_look` (`environment`, `envRotation`, `envExposure`).
 - Surface Shaders output Base Color, AO/Roughness/Metalness, Normal and Emissive separately; each material generates its normal map from its own height function.
 
 ### Stylized NPR · cel shading / anime / painterly
@@ -243,7 +244,7 @@ An immersive canvas keeps the model large, with frosted-glass material and appea
 - **Pro:** all parameters grouped into Base / Surface / Volume, material-category filters, filter strength and scope, and channel inspection.
 - Both modes share material and settings state. Switching does not discard changes. `lite: true` in `src/presets.js` / `src/npr.js` determines which sliders appear in Lite.
 
-**Display** follows MaterialX Viewer: the model floats against a clear HDR environment (studio / sunset / night / outdoor HDRs, or the procedural sky), without a floor or pedestal and without auto-rotation. Drag to inspect it.
+**Display** follows MaterialX Viewer: the model floats against a clear HDR environment (the procedural sky or your own uploaded panoramas), without a floor or pedestal and without auto-rotation. Drag to inspect it.
 
 - **Shader Ball** (default): the shell uses the current material; the inner color ring and gray base remain realistic as calibration references in every mode.
 - **Sphere / Cube** (rounded): share the Shader Ball's framing.
@@ -272,13 +273,14 @@ Then use Cindy's `ghost_forge_pack` to package `dist/cindy-plugin/` as `shaderma
 | `write_shader` | Create or edit a custom GLSL shader, compile-check it, then add it to the Custom group; failures include line numbers |
 | `delete_shader` | Delete a custom shader (built-in shaders cannot be deleted) |
 | `import_model` / `delete_model` | Import a GLB from an HTTPS URL / remove an imported model; see [Import your own models](#-import-your-own-models) |
+| `import_environment` / `delete_environment` | Import a panorama (JPG/PNG/WebP) from an HTTPS URL / remove an uploaded environment |
 | `read_effect` / `write_effect` / `delete_effect` | Read effect instructions and examples, compile-check and save effects, or delete them; see [Programmable effects](#-programmable-effects-foundation) |
 
 - If no ShaderMaker page is open, the plugin opens the task page in the current task's right sidebar (first load takes about 2 seconds).
 - The same page has two entry points: the main view (`mainView`) and task view (`taskView`). If several are open, the plugin chooses the current task's task view, then the main view, then another view; it does not run an action twice.
 - **Plugin build differences** (the plugin page's CSP allows only bundled scripts and does not allow network access):
   - esbuild bundles `src/` and Three.js into one `app.js`, replacing the import map (inline scripts are blocked by CSP).
-  - HDR environments are bundled and compressed as a base JPEG plus gain PNG (`cindy-plugin/hdrPack.mjs`) and reconstructed as HDR when the page loads (`src/packedHdr.js`). Four 2K environments take about 3.7 MB, smaller than the original 1K `.hdr` files, with highlight color and energy error within 2.5%. The web version loads `.hdr` files directly from Poly Haven.
+  - No environment maps are bundled: the only built-in environment is the procedural sky and everything else is uploaded, so the plugin is about 2.3 MB.
   - The display model is vertex-quantized (`cindy-plugin/modelPack.mjs`), which Three.js supports natively without a decoder; its size drops from 1.36 MB to 0.9 MB.
   - The full package is about 4.9 MB, down from 6.8 MB and below the 8 MB limit.
   - `ghost.json` is generated by `cindy-plugin/manifest.mjs`. Tool options come from existing data, so new materials, filters and environments do not require plugin code changes.
@@ -298,7 +300,7 @@ read_shader (learn the format) → write_shader (submit GLSL) → fix compile er
 - **Storage:** custom shaders live in this computer's browser storage (IndexedDB), shared and synchronized in real time between the main view and task view. They persist when the page is reopened, but do not move to another computer or enter Git.
 - **Promote a shader to the built-in library:** move its code and preset into `src/shaders.js` / `src/presets.js`, then publish it with the plugin so every computer gets it.
 
-The library can grow without much package growth: all 58 shader sources total about 66 KB (about 17 KB compressed). The largest package assets are four HDR environments (8.3 MB uncompressed) and the Shader Ball model (2.4 MB). See `src/customShaders.js`.
+The library can grow without much package growth: all 58 shader sources total about 66 KB (about 17 KB compressed). The largest package asset is the Shader Ball model (2.4 MB, quantized at build time). See `src/customShaders.js`.
 
 ---
 
@@ -320,7 +322,8 @@ src/
 ├── filters.js         Filter registry: parameters, keywords and GLSL per filter
 ├── stylize.js         Screen-space filter pipeline (compiles the stack into passes)
 ├── models.js          Display models (Shader Ball / sphere / cube), tessellation, calibration parts
-├── environments.js    HDR environments
+├── environments.js    Built-in environments (procedural sky only)
+├── customEnv.js       Uploaded environments: .hdr/.exr/image decoding, key-light and exposure analysis
 ├── sky.js             Procedural sky: sky shader, sun color, sun-driven lights
 ├── nl.js              Natural-language parsing
 └── vendor/            tileable-shaders (MIT)
@@ -337,4 +340,3 @@ See [CHANGELOG.md](CHANGELOG.md) for changes in each version. To publish a relea
 
 - `assets/models/materialx-shaderball.glb`: the default Shader Ball from MaterialX Viewer, from [AcademySoftwareFoundation/MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX/tree/main/resources/Geometry), under Apache License 2.0; see `assets/models/MATERIALX-LICENSE.txt`. The inner color ring is generated by ShaderMaker and is not part of the original asset; the plugin version of the model is vertex-quantized.
 - `src/vendor/tileable-shaders.js`: [tuxalin/procedural-tileable-shaders](https://github.com/tuxalin/procedural-tileable-shaders), MIT; see `src/vendor/TILEABLE-SHADERS-LICENSE.txt`. ShaderMaker uses its seamless noise, Voronoi, crack, hexagon, weave and domain-warping functions. A few original type errors prevented compilation, so minimal fixes are marked `ShaderMaker`.
-- HDR environments: [Poly Haven](https://polyhaven.com/hdris), CC0. The web version loads 2K `.hdr` files from Poly Haven's CDN; the Cindy plugin bundles compressed 2K versions.

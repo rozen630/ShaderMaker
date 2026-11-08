@@ -21,6 +21,8 @@ const handlers = {
   deleteEffect: (payload) => shaderMaker.deleteEffect(payload),
   importModel: (payload) => shaderMaker.importModelFrom(payload),
   deleteModel: (payload) => shaderMaker.deleteModel(payload),
+  importEnvironment: (payload) => shaderMaker.importEnvironmentFrom(payload),
+  deleteEnvironment: (payload) => shaderMaker.deleteEnvironment(payload),
 };
 
 channel.addEventListener("message", async ({ data }) => {

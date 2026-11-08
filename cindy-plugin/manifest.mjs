@@ -69,8 +69,19 @@ export function buildManifest(catalog, version) {
             },
             environment: {
               type: "string",
-              enum: catalog.environments.map((item) => item.id),
-              description: `环境光：${list(catalog.environments)}。sky 是程序天空，用 sky 参数调太阳和天气，其余是 HDR`,
+              description: "环境：sky=程序天空（默认，用 sky 参数调太阳和天气），或用户上传的环境图的 id / 名字（状态里的 customEnvironments）",
+            },
+            envRotation: {
+              type: "number",
+              minimum: catalog.envParams.rotation.min,
+              maximum: catalog.envParams.rotation.max,
+              description: "上传环境图绕竖直轴旋转的角度（度），主光方向跟着转；对 sky 无效",
+            },
+            envExposure: {
+              type: "number",
+              minimum: catalog.envParams.exposure.min,
+              maximum: catalog.envParams.exposure.max,
+              description: "上传环境图的曝光补偿（EV，0 = 自动曝光）；对 sky 无效",
             },
             sky: {
               type: "object",
@@ -216,6 +227,24 @@ export function buildManifest(catalog, version) {
           },
           required: ["url"],
         },
+      },
+      {
+        name: "import_environment",
+        description:
+          "从一个 HTTPS 地址导入全景环境图（2:1 等距柱状投影的 JPG / PNG / WebP）到 ShaderMaker（经 Cindy 下载进媒体库），存到这台电脑的浏览器存储并切换过去。导入时自动分析主光方向、颜色和曝光，之后可用 set_look 的 envRotation / envExposure 微调。.hdr / .exr 不能经网址导入，请让用户在面板「环境」里点「上传」或直接拖到画面上。会联网下载该地址。",
+        parameters: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "全景图的 HTTPS 地址" },
+            name: { type: "string", description: "显示名称（可选，默认用文件名）" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "delete_environment",
+        description: "删除一个上传的环境图（程序天空不能删），从这台电脑的浏览器存储里移除；正在用的话切回程序天空。",
+        parameters: { type: "object", properties: { id: { type: "string", description: "上传环境的 id" } }, required: ["id"] },
       },
       {
         name: "delete_model",

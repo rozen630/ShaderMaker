@@ -143,6 +143,23 @@ async function handle(msg) {
     const urls = ['/media/' + hash + '.' + ext, '/media/' + hash + ext];
     return { ok: true, result: await ask(page, 'importModel', { urls: urls, name: args.name }, 120000) };
   }
+  if (msg.tool === 'import_environment') {
+    // 同 import_model：图片经 Cindy 下载进媒体库，页面再从同源的 /media/ 读（媒体库不收 .hdr / .exr）
+    const fetched = await cindy.fetch({ url: String(args.url || ''), as: 'media', timeoutMs: 300000, label: 'ShaderMaker 环境图', callId: msg.callId });
+    if (!fetched || !fetched.ok) {
+      return { ok: false, errorCode: 'DOWNLOAD_FAILED', message: '下载失败：' + ((fetched && fetched.message) || '未知原因') };
+    }
+    if (!fetched.media || !/^\.?(jpe?g|png|webp)$/i.test(String(fetched.media.ext || ''))) {
+      return { ok: false, errorCode: 'NOT_AN_IMAGE', message: '下载到的不是 JPG / PNG / WebP 图片（HTTP ' + fetched.status + '）。.hdr / .exr 请让用户在页面上点「上传」或拖到画面上' };
+    }
+    const hash = fetched.media.hash;
+    const ext = String(fetched.media.ext).replace(/^\./, '');
+    const urls = ['/media/' + hash + '.' + ext, '/media/' + hash + ext];
+    return { ok: true, result: await ask(page, 'importEnvironment', { urls: urls, name: args.name }, 120000) };
+  }
+  if (msg.tool === 'delete_environment') {
+    return { ok: true, result: await ask(page, 'deleteEnvironment', { id: args.id }, 15000) };
+  }
   if (msg.tool === 'delete_model') {
     return { ok: true, result: await ask(page, 'deleteModel', { id: args.id }, 15000) };
   }
